@@ -1,0 +1,210 @@
+{
+  "id": "fluidr3-subset",
+  "name": "FluidR3 GM subset",
+  "version": 1,
+  "drums": {
+    "kick": [
+      "drums/kick.mp3"
+    ],
+    "snare": [
+      "drums/snare.mp3",
+      "drums/snareAlt.mp3"
+    ],
+    "sidestick": [
+      "drums/sidestick.mp3"
+    ],
+    "hatClosed": [
+      "drums/hatClosed.mp3"
+    ],
+    "hatPedal": [
+      "drums/hatPedal.mp3"
+    ],
+    "hatOpen": [
+      "drums/hatOpen.mp3"
+    ],
+    "ride": [
+      "drums/ride.mp3",
+      "drums/rideAlt.mp3"
+    ],
+    "rideBell": [
+      "drums/rideBell.mp3"
+    ],
+    "crash": [
+      "drums/crash.mp3",
+      "drums/crashAlt.mp3"
+    ],
+    "tomL": [
+      "drums/tomL.mp3"
+    ],
+    "tomM": [
+      "drums/tomM.mp3"
+    ],
+    "tomH": [
+      "drums/tomH.mp3"
+    ]
+  },
+  "pitched": {
+    "bass": [
+      {
+        "midi": 28,
+        "file": "bass/28.mp3"
+      },
+      {
+        "midi": 30,
+        "file": "bass/30.mp3"
+      },
+      {
+        "midi": 32,
+        "file": "bass/32.mp3"
+      },
+      {
+        "midi": 34,
+        "file": "bass/34.mp3"
+      },
+      {
+        "midi": 36,
+        "file": "bass/36.mp3"
+      },
+      {
+        "midi": 38,
+        "file": "bass/38.mp3"
+      },
+      {
+        "midi": 40,
+        "file": "bass/40.mp3"
+      },
+      {
+        "midi": 42,
+        "file": "bass/42.mp3"
+      },
+      {
+        "midi": 44,
+        "file": "bass/44.mp3"
+      },
+      {
+        "midi": 46,
+        "file": "bass/46.mp3"
+      },
+      {
+        "midi": 48,
+        "file": "bass/48.mp3"
+      },
+      {
+        "midi": 50,
+        "file": "bass/50.mp3"
+      },
+      {
+        "midi": 52,
+        "file": "bass/52.mp3"
+      },
+      {
+        "midi": 54,
+        "file": "bass/54.mp3"
+      },
+      {
+        "midi": 55,
+        "file": "bass/55.mp3"
+      }
+    ],
+    "piano": [
+      {
+        "midi": 48,
+        "file": "piano/48.mp3"
+      },
+      {
+        "midi": 50,
+        "file": "piano/50.mp3"
+      },
+      {
+        "midi": 52,
+        "file": "piano/52.mp3"
+      },
+      {
+        "midi": 54,
+        "file": "piano/54.mp3"
+      },
+      {
+        "midi": 56,
+        "file": "piano/56.mp3"
+      },
+      {
+        "midi": 58,
+        "file": "piano/58.mp3"
+      },
+      {
+        "midi": 60,
+        "file": "piano/60.mp3"
+      },
+      {
+        "midi": 62,
+        "file": "piano/62.mp3"
+      },
+      {
+        "midi": 64,
+        "file": "piano/64.mp3"
+      },
+      {
+        "midi": 66,
+        "file": "piano/66.mp3"
+      },
+      {
+        "midi": 68,
+        "file": "piano/68.mp3"
+      },
+      {
+        "midi": 70,
+        "file": "piano/70.mp3"
+      },
+      {
+        "midi": 72,
+        "file": "piano/72.mp3"
+      },
+      {
+        "midi": 74,
+        "file": "piano/74.mp3"
+      },
+      {
+        "midi": 76,
+        "file": "piano/76.mp3"
+      },
+      {
+        "midi": 78,
+        "file": "piano/78.mp3"
+      },
+      {
+        "midi": 80,
+        "file": "piano/80.mp3"
+      }
+    ],
+    "guitar": [
+      {
+        "midi": 55,
+        "file": "guitar/55.mp3"
+      },
+      {
+        "midi": 58,
+        "file": "guitar/58.mp3"
+      },
+      {
+        "midi": 61,
+        "file": "guitar/61.mp3"
+      },
+      {
+        "midi": 64,
+        "file": "guitar/64.mp3"
+      },
+      {
+        "midi": 67,
+        "file": "guitar/67.mp3"
+      },
+      {
+        "midi": 70,
+        "file": "guitar/70.mp3"
+      },
+      {
+        "midi": 73,
+        "file": "guitar/73.mp3"
+      }
+    ]
+  }
+}
