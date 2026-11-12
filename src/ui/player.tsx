@@ -94,7 +94,10 @@ export function Player({
           曲库
         </button>
         <div class="now-title">
-          <h1>{tune.title}</h1>
+          <h1>
+            {tune.title}
+            {tune.review === 'pending-dean' && <span class="badge-pending">待审</span>}
+          </h1>
           <p>
             演奏 {sound.name}
             {chart !== 'concert' && ` · ${chartName(chart)}谱 ${shown.name}`}

@@ -6,9 +6,13 @@ import type { RoleId, Tune } from '../types.ts'
 
 const FILTERS = [
   { id: 'all', label: '全部' },
+  { id: 'standards', label: '标准曲' },
+  { id: 'pop', label: '流行' },
   { id: 'swing', label: 'Swing' },
   { id: 'bossa', label: 'Bossa' },
   { id: 'ballad', label: 'Ballad' },
+  { id: 'shuffle', label: 'Shuffle' },
+  { id: 'original', label: '原创' },
 ] as const
 
 export function Library({
@@ -27,11 +31,27 @@ export function Library({
   onHideHint: () => void
 }) {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['id']>('all')
+  const [query, setQuery] = useState('')
   const info = roleInfo(role)
+  const q = query.trim().toLowerCase()
   const tunes = TUNES.filter((tune) => {
-    if (filter === 'all') return true
-    if (filter === 'swing') return tune.style === 'swing' || tune.style === 'up'
-    return tune.style === filter
+    if (filter === 'standards' && !tune.tags.includes('jazz-standard')) return false
+    if (filter === 'pop' && !tune.tags.includes('pop')) return false
+    if (filter === 'original' && !tune.tags.includes('momo-original')) return false
+    if (filter === 'swing' && tune.style !== 'swing' && tune.style !== 'up') return false
+    if (filter === 'bossa' && tune.style !== 'bossa') return false
+    if (filter === 'ballad' && tune.style !== 'ballad') return false
+    if (filter === 'shuffle' && tune.style !== 'shuffle') return false
+
+    if (q) {
+      const match =
+        tune.title.toLowerCase().includes(q) ||
+        tune.titleEn.toLowerCase().includes(q) ||
+        (tune.composer && tune.composer.toLowerCase().includes(q)) ||
+        tune.key.toLowerCase().includes(q)
+      if (!match) return false
+    }
+    return true
   })
   return (
     <section class="library">
@@ -56,6 +76,13 @@ export function Library({
       )}
       <div class="lib-head">
         <h1>今晚练什么</h1>
+        <input
+          type="search"
+          class="search-input"
+          placeholder="搜索曲名、英文名、作曲家、调性..."
+          value={query}
+          onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
+        />
         <div class="filters" role="tablist">
           {FILTERS.map((item) => (
             <button
@@ -70,7 +97,7 @@ export function Library({
         </div>
       </div>
       <div class="setlist">
-        {tunes.length === 0 && <p class="empty">这一类还没有曲子。</p>}
+        {tunes.length === 0 && <p class="empty">没有找到匹配的曲子。</p>}
         {tunes.map((tune) => (
           <TuneRow key={tune.id} tune={tune} onOpen={onOpen} />
         ))}
@@ -90,8 +117,12 @@ function TuneRow({ tune, onOpen }: { tune: Tune; onOpen: (id: string) => void })
     <button type="button" class="tune" onClick={() => onOpen(tune.id)}>
       <span class="tempo">{tune.bpm}</span>
       <span class="tune-body">
-        <span class="tune-title">{tune.title}</span>
+        <span class="tune-title">
+          {tune.title}
+          {tune.review === 'pending-dean' && <span class="badge-pending">待审</span>}
+        </span>
         <span class="tune-meta">
+          {tune.composer ? `${tune.composer} · ` : ''}
           {tune.titleEn} · {tune.key.replace('b', '♭').replace('#', '♯')} · {tune.bars.length} 小节
         </span>
         <span class="blurb">{tune.blurb}</span>
