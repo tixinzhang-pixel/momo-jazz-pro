@@ -1,5 +1,28 @@
 # 更新记录
 
+## 0.3.0-beta.1
+
+- 律动与动态大改（基于《So What》参考录音 Demucs 分轨实测数据与参数化配置）：
+  - 两级演奏模式（HEAD / SOLO）：第 1 遍与收尾遍（遍数 ≥ 3 时）进入 HEAD 模式，Ride 降低约 8 dB，主要靠 2、4 拍踩镲与轻击 Timekeeping，军鼓基底 0 dB 稀疏伴奏；SOLO 模式以 Ride 为主，军鼓分乐段递进。
+  - 独奏段落分块（Auto 模式）：每 2 遍作为一个独奏者 Block，第 2 遍 Ride 与军鼓提升 +2~4 dB；换 Block 时回落 2~3 dB 后再推过前高。固定力度模式（轻 / 中 / 强）保持常态常数。
+  - 段落加花与重音（A3）：32 小节曲式中，第 4/12/20/28 小节不加花（前半段最静）；第 8 小节轻铺垫；第 16 小节中铺垫；第 24/32 小节强铺垫（底鼓、军鼓全力推动进下一段）；B 段 Bridge Lift 提升 2 dB；仅在进入新独奏 Block 或对奏切换的第一小节第 1 拍打 Crash。
+  - 加花设置：练习菜单新增「鼓组加花」选项（段落结尾默认 / 每 4 小节 / 关）。
+  - 鼓组平衡与音色：鼓总线降至贝斯下方约 3 dB；Ride 预设推子降至 0.38（~ -8.4 dB），高架滤波温和压暗 6 kHz 以上高频；低踩底鼓保持 -14 dB 极轻羽毛触感；贝斯全曲电平平直（波动 ≤ ±2 dB），消除第 1 拍过度加重。
+  - 钢琴伴奏：密度与位置参数化，SOLO 约 3 击/小节（~30% 抢拍提前与 4&，~45% 正拍），电平随独奏块以鼓组一半 dB 上升，清晰可辨。
+  - 对奏优化：轮到用户时军鼓大幅降低 15 dB，Ride 降低 4 dB，贝斯电平保持正常。
+- Swing 律动控制（Scope B）：
+  - 连续 Swing 滑杆（1.00 到 3.50，步长 0.05），显示精确比率如 "2.40 : 1" 与参考刻度（1:1 平八分、1.7:1 现代快 Swing、2:1 三连音、2.8:1 深摇摆）。
+  - 「自动（风格默认）」跟随速度曲线自适应，手动拉动即切为自定义，支持一键「恢复风格默认」。
+  - 微细分（Subdivision）切换：八分音符（默认）、十六分摇摆（Bounce）、十六分平拍。
+  - 新增 Shuffle 风格：专属 Shuffle 鼓组律动与贝斯跳跃 Line。
+- 曲库升级（Scope D 第一阶段）：
+  - 数据模型升级为生产级规范，支持曲式段落、标签、审校状态与来源；新增 `docs/TUNE_FORMAT.md` 文档。
+  - 曲库扩充至 35 首（涵盖《Summertime》、《All the Things You Are》、《Take the 'A' Train》、《Satin Doll》、《Fly Me to the Moon》、《There Will Never Be Another You》、《Misty》、《Footprints》、《Cantaloupe Island》、《Billie's Bounce》、《Bag's Groove》、《Impressions》、《Song for My Father》、《The Girl from Ipanema》、《Watermelon Man》及披头士、史提夫·汪达流行经典）。
+  - 新增曲目全部标注「待审」角标，待教务 Dean 复核。
+  - 曲库新增实时搜索输入框与分类标签过滤（标准曲、流行、原创、Swing、Bossa、Ballad、Shuffle）。
+- 离线渲染与评测工具：
+  - 新增 `renderTuneWav` 工具与 URL 离线评测机制（`?render=<tuneId>`），可在浏览器一键导出 OfflineAudioContext 渲染的高保真 WAV，供 Audacity / demucs 精确复测各轨动态。
+
 ## 0.2.0-beta.1
 
 - 遍数：1 到 30，另有「一直」。走完最后一遍会停，并留一个结束和弦。
