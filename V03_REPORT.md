@@ -259,6 +259,7 @@ npm run dev
 ## 6. Git Log for Branch `v0.3`
 
 ```text
+e44da84 docs(v0.3): add V03_REPORT implementation report
 01510a3 chore(release): bump version to 0.3.0-beta.1 and update changelog/README
 2bb9c72 feat(v0.3): expand tune library to 35 tunes, add search/filters, pending badge, and offline WAV render
 c30e5f0 feat(v0.3): wire swing slider, subdivision, and fills controls to engine and UI
