@@ -1,33 +1,74 @@
 import { parseChart } from '../theory.ts'
-import type { StyleId, Tune } from '../types.ts'
+import type { FormSectionSpec, ReviewStatus, StyleId, Tune, TuneSourceKind, TuneTag } from '../types.ts'
 
-interface TuneSource {
+export interface TuneSource {
   id: string
   title: string
   titleEn: string
+  composer?: string
   blurb: string
   key: string
   style: StyleId
   bpm: number
+  timeSignature?: '4/4' | '3/4'
+  form?: FormSectionSpec[]
+  tags?: TuneTag[]
+  review?: ReviewStatus
+  source?: TuneSourceKind
   blues?: boolean
   voicing?: 'quartal'
   original?: boolean
   chart: string
 }
 
+export function deriveFormSections(bars: ReturnType<typeof parseChart>): FormSectionSpec[] {
+  const sections: FormSectionSpec[] = []
+  let currentLabel = bars[0]?.section || bars[0]?.activeSection || 'A'
+  let count = 0
+  for (let i = 0; i < bars.length; i++) {
+    const bar = bars[i]
+    if (bar.section != null && i > 0 && count > 0) {
+      sections.push({ label: currentLabel, bars: count })
+      currentLabel = bar.section
+      count = 0
+    }
+    count++
+  }
+  if (count > 0) {
+    sections.push({ label: currentLabel, bars: count })
+  }
+  return sections
+}
+
 function tune(src: TuneSource): Tune {
+  const bars = parseChart(src.chart)
+  const form = src.form ?? deriveFormSections(bars)
+  let tags: TuneTag[] = src.tags ?? ['jazz-standard']
+  if (!src.tags) {
+    if (src.original) {
+      tags = ['momo-original']
+    } else if (src.id.includes('ii-v-i')) {
+      tags = ['teaching']
+    }
+  }
   return {
     id: src.id,
     title: src.title,
     titleEn: src.titleEn,
+    composer: src.composer,
     blurb: src.blurb,
     key: src.key,
     style: src.style,
     bpm: src.bpm,
+    timeSignature: src.timeSignature ?? '4/4',
+    form,
+    tags,
+    review: src.review ?? 'approved',
+    source: src.source ?? 'momo-written',
     blues: Boolean(src.blues),
     voicing: src.voicing,
     original: src.original,
-    bars: parseChart(src.chart),
+    bars,
   }
 }
 
@@ -270,4 +311,5 @@ export const STYLE_LABEL: Record<StyleId, string> = {
   up: 'Up Swing',
   ballad: 'Ballad',
   bossa: 'Bossa',
+  shuffle: 'Shuffle',
 }

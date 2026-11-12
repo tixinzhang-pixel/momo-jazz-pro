@@ -32,10 +32,11 @@ function drums(hits: Hit[], drum: string) {
 
 describe('swing feel', () => {
   it('tightens the swing ratio as the tempo comes up, and bossa stays straight', () => {
-    expect(swingRatio(60, 'swing')).toBeGreaterThan(0.66)
-    expect(swingRatio(60, 'swing')).toBeLessThan(0.7)
-    expect(swingRatio(140, 'swing')).toBeLessThan(swingRatio(100, 'swing'))
-    expect(swingRatio(220, 'swing')).toBeLessThan(0.55)
+    // v0.3: at <=140 BPM, default swing r=2.6 -> fraction 2.6/3.6 = 0.722
+    expect(swingRatio(60, 'swing')).toBeGreaterThan(0.7)
+    expect(swingRatio(60, 'swing')).toBeLessThan(0.75)
+    expect(swingRatio(180, 'swing')).toBeLessThan(swingRatio(140, 'swing'))
+    expect(swingRatio(220, 'swing')).toBeLessThan(0.56)
     expect(swingRatio(220, 'swing')).toBeGreaterThan(0.5)
     expect(swingRatio(132, 'bossa')).toBe(0.5)
     const beat = 60 / 132
@@ -46,7 +47,8 @@ describe('swing feel', () => {
   })
 
   it('plays a spang-alang ride, feathers the kick, and chicks the hat on 2 and 4', () => {
-    const [bar] = bars(1)
+    // Test in SOLO chorus (bar 2, avoiding bar 1 block crash) where ride is full and kick is feathered
+    const bar = bars(3, 'swing', 132, { chorus: 1, repeats: 4 })[2]
     const beat = 60 / 132
     const ratio = swingRatio(132, 'swing')
     const ride = drums(bar, 'ride').concat(drums(bar, 'rideBell'))

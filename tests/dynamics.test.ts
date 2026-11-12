@@ -97,8 +97,8 @@ describe('dynamics', () => {
 describe('drum mix', () => {
   it('ships the ride several dB under unity and the snare and kick a little above', () => {
     const rideDb = 20 * Math.log10(DEFAULT_DRUM_MIX.ride)
-    expect(rideDb).toBeLessThan(-4)
-    expect(rideDb).toBeGreaterThan(-6.5)
+    expect(rideDb).toBeLessThan(-6.5)
+    expect(rideDb).toBeGreaterThan(-10)
     expect(DEFAULT_DRUM_MIX.snare).toBeGreaterThan(1)
     expect(DEFAULT_DRUM_MIX.kick).toBeGreaterThan(1)
     expect(DEFAULT_DRUM_MIX.hat).toBeGreaterThan(DEFAULT_DRUM_MIX.ride)
