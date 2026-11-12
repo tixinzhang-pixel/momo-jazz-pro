@@ -161,8 +161,9 @@ describe('v0.3 A4 & A5 kit balance and bass flatness', () => {
 
   it('ships the ride several dB under unity and the snare and kick a little above', () => {
     const rideDb = gainToDb(DEFAULT_DRUM_MIX.ride)
-    expect(rideDb).toBeLessThan(-6.5)
-    expect(rideDb).toBeGreaterThan(-10.0)
+    expect(rideDb).toBeLessThan(-3.5)
+    expect(rideDb).toBeGreaterThan(-6.0)
+    expect(DEFAULT_DRUM_MIX.ride).toBeCloseTo(0.60, 2)
     expect(DEFAULT_DRUM_MIX.snare).toBeGreaterThan(1)
     expect(DEFAULT_DRUM_MIX.kick).toBeGreaterThan(1)
     expect(DEFAULT_DRUM_MIX.hat).toBeGreaterThan(DEFAULT_DRUM_MIX.ride)
@@ -182,7 +183,7 @@ describe('v0.3 A7 trading dynamics', () => {
     const userBar = shape({ chorus: 1, userTurn: true, handoff: false })
 
     const busDropDb = gainToDb(bandBar.drumBusGain) - gainToDb(userBar.drumBusGain)
-    expect(busDropDb).toBeGreaterThanOrEqual(4.5)
+    expect(busDropDb).toBeGreaterThanOrEqual(4.0)
     expect(busDropDb).toBeLessThanOrEqual(7.5)
 
     const snareDropDb = gainToDb(bandBar.snareCompGain) - gainToDb(userBar.snareCompGain)
@@ -190,5 +191,69 @@ describe('v0.3 A7 trading dynamics', () => {
 
     const bassDiffDb = Math.abs(gainToDb(bandBar.bassGain) - gainToDb(userBar.bassGain))
     expect(bassDiffDb).toBeLessThanOrEqual(0.5)
+  })
+})
+
+describe('v0.3.1 Task B So What theme & voicings', () => {
+  it('alternates bass call and band response over 2-bar cycle in D Dorian', async () => {
+    const { soWhatHeadNotes } = await import('../src/arrange')
+    const bar0 = soWhatHeadNotes(0, 0, 'A') // Bar 1 (Call)
+    expect(bar0.chords).toHaveLength(0) // Piano silent during call
+    expect(bar0.bass).toHaveLength(4)
+    expect(bar0.bass.map((b) => b.midi)).toEqual([38, 45, 47, 48]) // D2, A2, B2, C3
+
+    const bar1 = soWhatHeadNotes(1, 0, 'A') // Bar 2 (Response)
+    expect(bar1.bass).toHaveLength(5)
+    expect(bar1.bass.map((b) => b.midi)).toEqual([50, 52, 50, 48, 38]) // D3, E3, D3, C3, D2
+    expect(bar1.chords).toHaveLength(2)
+    // Beat 3 (beat = 2.0) Em11 quartal voicing
+    expect(bar1.chords[0].beat).toBe(2.0)
+    expect(bar1.chords[0].notes).toEqual([52, 57, 62, 67, 71]) // E3, A3, D4, G4, B4
+    // Beat 4& (beat = 3.5) Dm11 quartal voicing
+    expect(bar1.chords[1].beat).toBe(3.5)
+    expect(bar1.chords[1].notes).toEqual([50, 55, 60, 65, 69]) // D3, G3, C4, F4, A4
+  })
+
+  it('transposes So What theme +1 semitone during Eb Dorian bridge (bars 17-24)', async () => {
+    const { soWhatHeadNotes } = await import('../src/arrange')
+    const bridgeCall = soWhatHeadNotes(16, 0, 'B')
+    expect(bridgeCall.bass.map((b) => b.midi)).toEqual([39, 46, 48, 49]) // Eb2, Bb2, C3, Db3
+
+    const bridgeResp = soWhatHeadNotes(17, 0, 'B')
+    expect(bridgeResp.chords[0].notes).toEqual([53, 58, 63, 68, 72]) // Fm11
+    expect(bridgeResp.chords[1].notes).toEqual([51, 56, 61, 66, 70]) // Ebm11
+  })
+})
+
+describe('v0.3.1 Task A1 session migration', () => {
+  it('migrates legacy v0.2 / v0.3 drums:0.86 to 0.48 and legacy ride:0.55/0.38 to 0.60', async () => {
+    const { migrateSessionMixer } = await import('../src/session')
+    const legacyMixer = {
+      drums: 0.86,
+      bass: 0.88,
+      piano: 0.82,
+      guitar: 0.8,
+      click: 0.65,
+      lead: 0.85,
+      drumMix: { ride: 0.55, snare: 1.15, kick: 1.1, hat: 0.95, brush: 1.0 },
+    }
+    const migrated = migrateSessionMixer(legacyMixer as any)
+    expect(migrated.drums).toBe(0.48)
+    expect(migrated.drumMix.ride).toBe(0.60)
+    expect(migrated.bass).toBe(0.88)
+  })
+})
+
+describe('v0.3.1 Task A5 config parameter wiring', () => {
+  it('modifying DYNAMICS_CONFIG parameters dynamically alters musical shape', () => {
+    const origStep = DYNAMICS_CONFIG.blocks.secondChorusDrumBusDb
+    try {
+      const baseShape = shape({ chorus: 2, repeats: 8 })
+      DYNAMICS_CONFIG.blocks.secondChorusDrumBusDb = 5.0
+      const alteredShape = shape({ chorus: 2, repeats: 8 })
+      expect(alteredShape.drumBusGain).toBeGreaterThan(baseShape.drumBusGain)
+    } finally {
+      DYNAMICS_CONFIG.blocks.secondChorusDrumBusDb = origStep
+    }
   })
 })

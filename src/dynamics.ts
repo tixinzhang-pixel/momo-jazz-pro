@@ -149,12 +149,7 @@ export function setupStrengthAt(
 export function musicalShape(input: ShapeInput): MusicalShape {
   const cfg = DYNAMICS_CONFIG
   const role = input.mode === 'auto' ? chorusRole(input.chorus, input.repeats) : 'fixed'
-  const playingMode: PlayingMode =
-    input.mode === 'low'
-      ? 'HEAD'
-      : input.mode === 'med' || input.mode === 'high'
-        ? 'SOLO'
-        : playingModeAt(input.chorus, input.repeats)
+  const playingMode: PlayingMode = playingModeAt(input.chorus, input.repeats)
 
   // Soloist block math (A2): SOLO starts at chorus 1 (0-based index 1)
   const soloChorusIndex = Math.max(0, input.chorus - 1)
@@ -186,47 +181,53 @@ export function musicalShape(input: ShapeInput): MusicalShape {
       }
     } else {
       // A1 & A2: SOLO mode with 2-chorus soloist blocks
-      // Block start steps up +1.5 dB per new block; 2nd chorus in block adds +2.2 dB drum bus and +3.5 dB ride/snare
-      const blockStartOverHeadDb = Math.min(
+      // Inside a block, 2nd chorus steps up (+3.4 dB net on ride); new block drops back ~2.2 dB from prev peak
+      const inBlockBusDb = chorusInBlock === 1 ? cfg.blocks.secondChorusDrumBusDb : 0
+      const blockBaseBusDb = Math.min(
         cfg.blocks.maxDrumBusOverHeadDb - cfg.blocks.secondChorusDrumBusDb,
         3.2 + soloBlock * cfg.blocks.newBlockStepDb,
       )
-      const inBlockBusDb = chorusInBlock === 1 ? cfg.blocks.secondChorusDrumBusDb : 0
-      const totalOverHeadDb = Math.min(cfg.blocks.maxDrumBusOverHeadDb, blockStartOverHeadDb + inBlockBusDb)
+      const totalOverHeadDb = Math.min(cfg.blocks.maxDrumBusOverHeadDb, blockBaseBusDb + inBlockBusDb)
 
       drumBusDb = cfg.modes.head.drumBusDbOffset + totalOverHeadDb
-      rideDb =
-        cfg.modes.solo.rideDbOffset +
-        soloBlock * cfg.blocks.newBlockStepDb +
-        (chorusInBlock === 1 ? cfg.blocks.secondChorusRideDb : 0)
-      snareCompDb = Math.min(
-        cfg.modes.solo.snareCompPeakDb,
-        cfg.modes.solo.snareCompBlock1Db +
-          soloBlock * cfg.blocks.newBlockSnareStepDb +
-          (chorusInBlock === 1 ? cfg.blocks.secondChorusSnareDb : 0),
+      const blockBaseRideDb = cfg.modes.solo.rideDbOffset
+      rideDb = blockBaseRideDb + (chorusInBlock === 1 ? cfg.blocks.secondChorusRideDb : 0)
+
+      const blockBaseSnareDb = Math.min(
+        cfg.modes.solo.snareCompPeakDb - cfg.blocks.secondChorusSnareDb,
+        cfg.modes.solo.snareCompBlock1Db + soloBlock * cfg.blocks.newBlockSnareStepDb,
       )
+      snareCompDb = blockBaseSnareDb + (chorusInBlock === 1 ? cfg.blocks.secondChorusSnareDb : 0)
       hatDb = cfg.modes.solo.hatDbOffset
       density = Math.min(0.98, 0.76 + soloBlock * 0.06 + chorusInBlock * 0.08)
     }
   } else {
-    // Fixed modes (low / med / high): keep A1/A3/A4 behaviour with constant block level
+    // Fixed modes (low / med / high): keep HEAD vs SOLO playing mode distinction (spec A3) with constant block levels
     const overHead = cfg.blocks.fixedModeOverHeadDb[input.mode]
-    drumBusDb = cfg.modes.head.drumBusDbOffset + overHead
-    if (input.mode === 'low') {
+    if (playingMode === 'HEAD') {
+      drumBusDb = cfg.modes.head.drumBusDbOffset + (input.mode === 'high' ? 1.5 : input.mode === 'med' ? 0.8 : 0)
       rideDb = cfg.modes.head.rideDbOffset
       snareCompDb = cfg.modes.head.snareCompDbOffset
       hatDb = cfg.modes.head.hatDbOffset
-      density = 0.45
-    } else if (input.mode === 'med') {
-      rideDb = 0
-      snareCompDb = cfg.modes.solo.snareCompBlock1Db
-      hatDb = 0
-      density = 0.78
+      density = input.mode === 'high' ? 0.68 : input.mode === 'med' ? 0.58 : 0.45
     } else {
-      rideDb = cfg.blocks.secondChorusRideDb
-      snareCompDb = cfg.modes.solo.snareCompPeakDb * 0.8
-      hatDb = 0
-      density = 0.96
+      drumBusDb = cfg.modes.head.drumBusDbOffset + overHead
+      if (input.mode === 'low') {
+        rideDb = cfg.modes.solo.rideDbOffset
+        snareCompDb = cfg.modes.solo.snareCompBlock1Db
+        hatDb = 0
+        density = 0.65
+      } else if (input.mode === 'med') {
+        rideDb = cfg.modes.solo.rideDbOffset
+        snareCompDb = cfg.modes.solo.snareCompBlock1Db + 2.0
+        hatDb = 0
+        density = 0.78
+      } else {
+        rideDb = cfg.modes.solo.rideDbOffset + cfg.blocks.secondChorusRideDb
+        snareCompDb = cfg.modes.solo.snareCompPeakDb * 0.8
+        hatDb = 0
+        density = 0.96
+      }
     }
   }
 
@@ -240,10 +241,11 @@ export function musicalShape(input: ShapeInput): MusicalShape {
 
   // A3: Early bars (bars 2-15 in a 32-bar chorus, i.e. barIndex 1..14) are the quietest part of the chorus
   const bar1 = input.barIndex + 1
-  if (input.form >= 24 && bar1 >= 2 && bar1 <= 15 && bar1 !== 8) {
+  const isEvery4FillBar = input.fillsMode === 'every4' && bar1 % 4 === 0
+  if (input.form >= 24 && bar1 >= 2 && bar1 <= 15 && bar1 !== 8 && !isEvery4FillBar) {
     snareCompDb += cfg.sections.earlyBarsQuietSnareDb
     drumBusDb += cfg.sections.earlyBarsQuietDrumBusDb
-  } else if (input.form < 24 && bar1 >= 2 && bar1 <= Math.floor(input.form * 0.45) && bar1 % 4 !== 0) {
+  } else if (input.form < 24 && bar1 >= 2 && bar1 <= Math.floor(input.form * 0.45) && bar1 % 4 !== 0 && !isEvery4FillBar) {
     snareCompDb += cfg.sections.earlyBarsQuietSnareDb * 0.65
     drumBusDb += cfg.sections.earlyBarsQuietDrumBusDb * 0.65
   }
@@ -277,9 +279,16 @@ export function musicalShape(input: ShapeInput): MusicalShape {
     setupKickDb = cfg.sections.strongSetup.kickDb
   }
 
-  // A6: Piano follows block intensity at half the dB change of drums
-  const drumDeltaOverHeadDb = drumBusDb - cfg.modes.head.drumBusDbOffset
-  let pianoDb = drumDeltaOverHeadDb * cfg.piano.blockIntensityFollowRatio - 1.5
+  // Theme fills attenuation (spec A1/A3 table: theme fills reduce ~8 dB)
+  if (playingMode === 'HEAD' && setupStrength !== 'none') {
+    setupDrumDb += cfg.modes.head.headFillDbAttenuation
+    setupSnareDb += cfg.modes.head.headFillDbAttenuation
+    setupKickDb += cfg.modes.head.headFillDbAttenuation
+  }
+
+  // A6: Piano follows block intensity at reduced dB change of drums (spec: ~2 dB solo-head)
+  const drumDeltaOverHeadDb = Math.max(0, drumBusDb - cfg.modes.head.drumBusDbOffset)
+  let pianoDb = drumDeltaOverHeadDb * cfg.piano.blockIntensityFollowRatio - 0.5
 
   // A5: Bass level stays flat across the whole tune (max +-2 dB between HEAD and SOLO peak)
   let bassDb = Math.max(
@@ -327,8 +336,8 @@ export function musicalShape(input: ShapeInput): MusicalShape {
     rideGain: clamp(dbToGain(drumBusDb + rideDb + cfg.voicing.rideExtraAttenuationDb), 0.12, 1.5),
     snareCompGain: clamp(dbToGain(drumBusDb + snareCompDb * 0.55), 0.1, 2.2),
     hatGain: clamp(dbToGain(drumBusDb + hatDb), 0.25, 1.5),
-    kickSetupGain: clamp(dbToGain(setupDrumDb + setupKickDb * 0.65), 1.0, 3.2),
-    snareSetupGain: clamp(dbToGain(setupDrumDb + setupSnareDb * 0.65), 1.0, 3.5),
+    kickSetupGain: clamp(dbToGain(setupDrumDb + setupKickDb * 0.65), 0.5, 3.2),
+    snareSetupGain: clamp(dbToGain(setupDrumDb + setupSnareDb * 0.65), 0.5, 3.5),
     bassGain: clamp(dbToGain(bassDb), 0.82, 1.18),
     pianoGain: clamp(dbToGain(pianoDb), 0.45, 1.45),
   }

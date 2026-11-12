@@ -103,7 +103,7 @@ export function fillKind(
   barIndex: number,
   form: number,
   style: StyleId,
-  chorus: number,
+  _chorus: number,
   fillsMode: FillsMode = 'section',
 ): 'none' | 'short' | 'medium' | 'big' {
   if (fillsMode === 'off') return 'none'
@@ -112,10 +112,7 @@ export function fillKind(
   if (fillsMode === 'every4') {
     if (barIndex === form - 1) return 'big'
     if ((barIndex + 1) % 8 === 0) return 'medium'
-    if ((barIndex + 1) % 4 === 0) {
-      const roll = (barIndex * 3 + chorus * 5) % 5
-      return roll < 3 ? 'short' : 'none'
-    }
+    if ((barIndex + 1) % 4 === 0) return 'short'
     return 'none'
   }
 
@@ -292,24 +289,21 @@ export function arrangeBar(input: ArrangeInput): Hit[] {
     })
   }
 
-  addBass(hits, {
-    tune,
-    barIndex,
-    chorus,
-    style,
-    transpose,
-    beatSec,
-    ratio,
-    rng,
-    humanize,
-    nextBass: nextLayout[0].chord.bass,
-    layout,
-  })
-
-  if (pianoSolo && trade) {
-    addPianoSolo(hits, { tune, barIndex, playBar, transpose, beatSec, ratio, style, len: trade.len, rng, humanize })
+  if (isSoWhatHead(tune, shape.playingMode)) {
+    addSoWhatHead(hits, {
+      barIndex,
+      form,
+      transpose,
+      beatSec,
+      ratio,
+      rng,
+      humanize,
+      shape,
+      userDrums,
+      drumSolo,
+    })
   } else {
-    addPianoComp(hits, {
+    addBass(hits, {
       tune,
       barIndex,
       chorus,
@@ -317,17 +311,35 @@ export function arrangeBar(input: ArrangeInput): Hit[] {
       transpose,
       beatSec,
       ratio,
-      layout,
       rng,
       humanize,
-      playingMode: shape.playingMode,
-      isBridge: tune.bars[barIndex]?.activeSection === 'B' || (form === 32 && barIndex >= 16 && barIndex < 24),
-      sparse: userDrums,
+      nextBass: nextLayout[0].chord.bass,
+      layout,
     })
-  }
 
-  if ((style === 'swing' || style === 'up' || style === 'shuffle') && !pianoSolo) {
-    addGuitar(hits, { tune, barIndex, chorus, transpose, beatSec, layout, rng, humanize })
+    if (pianoSolo && trade) {
+      addPianoSolo(hits, { tune, barIndex, playBar, transpose, beatSec, ratio, style, len: trade.len, rng, humanize })
+    } else {
+      addPianoComp(hits, {
+        tune,
+        barIndex,
+        chorus,
+        style,
+        transpose,
+        beatSec,
+        ratio,
+        layout,
+        rng,
+        humanize,
+        playingMode: shape.playingMode,
+        isBridge: tune.bars[barIndex]?.activeSection === 'B' || (form === 32 && barIndex >= 16 && barIndex < 24),
+        sparse: userDrums,
+      })
+    }
+
+    if ((style === 'swing' || style === 'up' || style === 'shuffle') && !pianoSolo) {
+      addGuitar(hits, { tune, barIndex, chorus, transpose, beatSec, layout, rng, humanize })
+    }
   }
 
   if (click !== 'off') {
@@ -521,7 +533,7 @@ function addSwingDrums(
   const push16 = (sixteenth: number, drum: DrumId, vel: number, duration = 0) => {
     const pocket = pocketFor(drum, vel)
     hits.push({
-      time: place(sixteenthOffset(sixteenth, o.beatSec, o.subRatio), pocket, o.rng, o.humanize),
+      time: place(sixteenthOffset(sixteenth, o.beatSec, o.subRatio, o.ratio), pocket, o.rng, o.humanize),
       part: 'drums',
       drum,
       velocity: humanizeDbVel(vel, cfg.voicing.ridePattern.humanizeVelDb, o.rng, o.humanize),
@@ -597,7 +609,7 @@ function addSwingDrums(
       push(ev.eighth, ev.drum, ev.vel, ev.drum === 'kick' ? 0.22 : 0.3)
     }
     // Anticipate crash on 4& into a new soloist block
-    if (o.nextBarNewBlock && (o.barIndex + o.chorus) % 3 === 0) {
+    if (o.nextBarNewBlock && o.rng() < cfg.sections.crash.anticipateProbability) {
       push(7, 'crash', cfg.voicing.ridePattern.quarterBaseVel * dbToGain(cfg.sections.crash.newBlockCrashDbOverRide * 0.75), 0)
     }
   }
@@ -738,13 +750,15 @@ function ridePattern(o: {
   const skipVel = q24 * dbToGain(skipDb) // -8 dB at med tempo, -13 dB above 180 BPM
 
   if (o.playingMode === 'HEAD' && DYNAMICS_CONFIG.modes.head.sparseRide) {
-    // A1 HEAD: Timekeeping is mostly hi-hat (foot on 2 & 4 + light stick on closed hat), with light ride
+    // A1 HEAD: Timekeeping is mostly hi-hat (foot on 2 & 4 + light stick on closed hat), with gentle ride pulse
     return [
       { eighth: 0, drum: 'ride', vel: q13 },
       { eighth: 2, drum: 'hatClosed', vel: 0.34 },
+      { eighth: 2, drum: 'ride', vel: q13 * 0.42 },
       { eighth: 3, drum: 'ride', vel: skipVel },
       { eighth: 4, drum: 'ride', vel: q13 * 0.95 },
       { eighth: 6, drum: 'hatClosed', vel: 0.36 },
+      { eighth: 6, drum: 'ride', vel: q13 * 0.42 },
       { eighth: 7, drum: 'ride', vel: skipVel * 0.95 },
     ]
   }
@@ -780,16 +794,16 @@ function snareCell(bar: number, chorus: number, bpm: number, playingMode: Playin
 const ACC = DYNAMICS_CONFIG.voicing.snareComping.accentBaseVel
 const GHOST = ACC * dbToGain(DYNAMICS_CONFIG.voicing.snareComping.ghostNoteAttenuationDb)
 
-// HEAD cells: average ~2.25 hits per bar (2 to 3 hits)
+// HEAD cells: average ~2.4 hits per bar (2 to 3 hits, keeping 2.0-2.5 hits/bar across full form)
 const HEAD_SNARE_CELLS: DrumEv[][] = [
-  [{ eighth: 3, drum: 'sidestick', vel: ACC }, { eighth: 7, drum: 'snare', vel: GHOST }],
+  [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 3, drum: 'sidestick', vel: ACC }, { eighth: 7, drum: 'snare', vel: GHOST }],
   [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 5, drum: 'sidestick', vel: ACC }],
   [{ eighth: 2, drum: 'snare', vel: GHOST }, { eighth: 5, drum: 'sidestick', vel: ACC }, { eighth: 7, drum: 'snare', vel: GHOST }],
-  [{ eighth: 3, drum: 'sidestick', vel: ACC }, { eighth: 6, drum: 'sidestick', vel: ACC * 0.92 }],
-  [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 3, drum: 'sidestick', vel: ACC }],
-  [{ eighth: 4, drum: 'sidestick', vel: ACC * 0.95 }, { eighth: 7, drum: 'snare', vel: GHOST }],
+  [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 3, drum: 'sidestick', vel: ACC }, { eighth: 6, drum: 'sidestick', vel: ACC * 0.92 }],
+  [{ eighth: 2, drum: 'sidestick', vel: ACC * 0.9 }, { eighth: 5, drum: 'sidestick', vel: ACC }],
+  [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 4, drum: 'sidestick', vel: ACC * 0.95 }, { eighth: 7, drum: 'snare', vel: GHOST }],
   [{ eighth: 2, drum: 'snare', vel: GHOST }, { eighth: 5, drum: 'sidestick', vel: ACC }, { eighth: 7, drum: 'sidestick', vel: ACC * 0.9 }],
-  [{ eighth: 3, drum: 'sidestick', vel: ACC }, { eighth: 7, drum: 'sidestick', vel: ACC * 0.94 }],
+  [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 3, drum: 'sidestick', vel: ACC }],
 ]
 
 // SOLO medium tempo cells: average ~2.5 hits per bar (2 to 3 hits)
@@ -815,45 +829,45 @@ const FAST_SOLO_SNARE_CELLS: DrumEv[][] = [
 ]
 
 const SHORT: DrumEv[][] = [
-  [{ eighth: 6, drum: 'snare', vel: 0.56, setup: true }, { eighth: 7, drum: 'snare', vel: 0.78, setup: true }],
-  [{ eighth: 6, drum: 'kick', vel: 0.62, setup: true }, { eighth: 7, drum: 'snare', vel: 0.8, setup: true }],
-  [{ eighth: 6, drum: 'tomL', vel: 0.58, setup: true }, { eighth: 7, drum: 'tomM', vel: 0.74, setup: true }],
-  [{ eighth: 6, drum: 'sidestick', vel: 0.52, setup: true }, { eighth: 7, drum: 'snare', vel: 0.76, setup: true }],
+  [{ eighth: 6, drum: 'snare', vel: 0.44, setup: true }, { eighth: 7, drum: 'snare', vel: 0.52, setup: true }],
+  [{ eighth: 6, drum: 'kick', vel: 0.38, setup: true }, { eighth: 7, drum: 'snare', vel: 0.48, setup: true }],
+  [{ eighth: 6, drum: 'tomL', vel: 0.42, setup: true }, { eighth: 7, drum: 'tomM', vel: 0.50, setup: true }],
+  [{ eighth: 6, drum: 'sidestick', vel: 0.40, setup: true }, { eighth: 7, drum: 'snare', vel: 0.46, setup: true }],
 ]
 const MEDIUM: DrumEv[][] = [
   [
-    { eighth: 4, drum: 'snare', vel: 0.52, setup: true },
-    { eighth: 5, drum: 'snare', vel: 0.64, setup: true },
-    { eighth: 6, drum: 'kick', vel: 0.66, setup: true },
-    { eighth: 7, drum: 'snare', vel: 0.86, setup: true },
-  ],
-  [
-    { eighth: 4, drum: 'tomL', vel: 0.6, setup: true },
-    { eighth: 5, drum: 'tomM', vel: 0.68, setup: true },
-    { eighth: 6, drum: 'tomH', vel: 0.76, setup: true },
+    { eighth: 4, drum: 'snare', vel: 0.56, setup: true },
+    { eighth: 5, drum: 'snare', vel: 0.68, setup: true },
+    { eighth: 6, drum: 'kick', vel: 0.48, setup: true },
     { eighth: 7, drum: 'snare', vel: 0.88, setup: true },
   ],
   [
-    { eighth: 4, drum: 'kick', vel: 0.62, setup: true },
-    { eighth: 5, drum: 'snare', vel: 0.58, setup: true },
-    { eighth: 6, drum: 'kick', vel: 0.72, setup: true },
-    { eighth: 7, drum: 'snare', vel: 0.86, setup: true },
+    { eighth: 4, drum: 'tomL', vel: 0.54, setup: true },
+    { eighth: 5, drum: 'tomM', vel: 0.62, setup: true },
+    { eighth: 6, drum: 'tomH', vel: 0.70, setup: true },
+    { eighth: 7, drum: 'snare', vel: 0.90, setup: true },
+  ],
+  [
+    { eighth: 4, drum: 'kick', vel: 0.46, setup: true },
+    { eighth: 5, drum: 'snare', vel: 0.64, setup: true },
+    { eighth: 6, drum: 'kick', vel: 0.50, setup: true },
+    { eighth: 7, drum: 'snare', vel: 0.88, setup: true },
   ],
 ]
 const BIG: DrumEv[][] = [
   [
-    { eighth: 4, drum: 'snare', vel: 0.68, setup: true },
-    { eighth: 5, drum: 'kick', vel: 0.78, setup: true },
-    { eighth: 6, drum: 'snare', vel: 0.88, setup: true },
-    { eighth: 7, drum: 'kick', vel: 0.84, setup: true },
-    { eighth: 7, drum: 'snare', vel: 0.96, setup: true },
+    { eighth: 4, drum: 'snare', vel: 0.88, setup: true },
+    { eighth: 5, drum: 'kick', vel: 0.44, setup: true },
+    { eighth: 6, drum: 'snare', vel: 0.94, setup: true },
+    { eighth: 7, drum: 'kick', vel: 0.46, setup: true },
+    { eighth: 7, drum: 'snare', vel: 0.98, setup: true },
   ],
   [
-    { eighth: 4, drum: 'kick', vel: 0.76, setup: true },
-    { eighth: 5, drum: 'snare', vel: 0.74, setup: true },
-    { eighth: 6, drum: 'kick', vel: 0.84, setup: true },
-    { eighth: 6, drum: 'snare', vel: 0.86, setup: true },
-    { eighth: 7, drum: 'snare', vel: 0.96, setup: true },
+    { eighth: 4, drum: 'kick', vel: 0.42, setup: true },
+    { eighth: 5, drum: 'snare', vel: 0.90, setup: true },
+    { eighth: 6, drum: 'kick', vel: 0.46, setup: true },
+    { eighth: 6, drum: 'snare', vel: 0.94, setup: true },
+    { eighth: 7, drum: 'snare', vel: 0.98, setup: true },
   ],
 ]
 
@@ -1743,4 +1757,136 @@ export function endingHits(input: {
     })
   }
   return hits
+}
+
+/**
+ * Task B: Determine whether the bar should play So What's iconic head theme.
+ * Active in HEAD mode (chorus 0 and out-head when repeats >= 3).
+ */
+export function isSoWhatHead(tune: Tune, playingMode: PlayingMode): boolean {
+  return tune.id === 'so-what' && playingMode === 'HEAD'
+}
+
+/**
+ * Task B: So What theme notes, beat alignments, and Bill Evans quartal voicings.
+ * 2-bar call and response cell:
+ * - Call bar (barIndex % 2 === 0): Paul Chambers bass riff, piano silent.
+ * - Response bar (barIndex % 2 === 1): Bass resolves to tonic on beat 3;
+ *   Band / Piano answers on Beat 3 (beat = 2.0) and Beat 4& (beat = 3.5).
+ */
+export function soWhatHeadNotes(
+  barIndex: number,
+  transpose: number,
+  activeSection?: string,
+): {
+  bass: { beat: number; midi: number; beats: number; vel: number }[]
+  chords: { beat: number; notes: number[]; vel: number; durationBeats: number }[]
+} {
+  const isEb = activeSection === 'B' || (barIndex >= 16 && barIndex < 24)
+  const semitones = transpose + (isEb ? 1 : 0)
+  const cycleBar = barIndex % 2
+
+  if (cycleBar === 0) {
+    // Call bar (odd 1-based bar: 1, 3, 5, 7, ... 31):
+    // Beat 2 (beat 1.0): D2 (38)
+    // Beat 3 (beat 2.0): A2 (45)
+    // Beat 3& (beat 2.5): B2 (47)
+    // Beat 4 (beat 3.0): C3 (48)
+    return {
+      bass: [
+        { beat: 1.0, midi: 38 + semitones, beats: 0.9, vel: 0.82 },
+        { beat: 2.0, midi: 45 + semitones, beats: 0.45, vel: 0.84 },
+        { beat: 2.5, midi: 47 + semitones, beats: 0.45, vel: 0.86 },
+        { beat: 3.0, midi: 48 + semitones, beats: 0.9, vel: 0.88 },
+      ],
+      chords: [], // Piano stays silent during the bass call
+    }
+  }
+
+  // Response bar (even 1-based bar: 2, 4, 6, ... 32):
+  // Bass finishes motif:
+  // Beat 1 (beat 0.0): D3 (50)
+  // Beat 1& (beat 0.5): E3 (52)
+  // Beat 2 (beat 1.0): D3 (50)
+  // Beat 2& (beat 1.5): C3 (48)
+  // Beat 3 (beat 2.0): D2 (38)
+  //
+  // Band / Piano response on Beat 3 (beat 2.0) and Beat 4& (beat 3.5):
+  // Beat 3: Em11 (or Fm11 for Eb): [52, 57, 62, 67, 71] + semitones
+  // Beat 4&: Dm11 (or Ebm11 for Eb): [50, 55, 60, 65, 69] + semitones
+  return {
+    bass: [
+      { beat: 0.0, midi: 50 + semitones, beats: 0.45, vel: 0.88 },
+      { beat: 0.5, midi: 52 + semitones, beats: 0.45, vel: 0.86 },
+      { beat: 1.0, midi: 50 + semitones, beats: 0.45, vel: 0.85 },
+      { beat: 1.5, midi: 48 + semitones, beats: 0.45, vel: 0.82 },
+      { beat: 2.0, midi: 38 + semitones, beats: 0.85, vel: 0.88 },
+    ],
+    chords: [
+      { beat: 2.0, notes: [52, 57, 62, 67, 71].map((n) => n + semitones), vel: 0.92, durationBeats: 0.75 },
+      { beat: 3.5, notes: [50, 55, 60, 65, 69].map((n) => n + semitones), vel: 0.96, durationBeats: 0.75 },
+    ],
+  }
+}
+
+function addSoWhatHead(
+  hits: Hit[],
+  o: {
+    barIndex: number
+    form: number
+    transpose: number
+    beatSec: number
+    ratio: number
+    rng: () => number
+    humanize: boolean
+    shape: MusicalShape
+    userDrums: boolean
+    drumSolo: boolean
+  },
+): void {
+  const isEb = o.barIndex >= 16 && o.barIndex < 24
+  const head = soWhatHeadNotes(o.barIndex, o.transpose, isEb ? 'B' : 'A')
+
+  // Bass notes
+  for (const b of head.bass) {
+    const when = swungBeatOffset(b.beat, o.beatSec, o.ratio)
+    hits.push({
+      time: place(when, 'bass', o.rng, o.humanize),
+      part: 'bass',
+      midi: b.midi,
+      velocity: humanVelocity(b.vel * o.shape.bassGain, o.rng, o.humanize),
+      duration: b.beats * o.beatSec * 0.92,
+      pan: -0.15,
+    })
+  }
+
+  // Piano response chords
+  for (const c of head.chords) {
+    const when = swungBeatOffset(c.beat, o.beatSec, o.ratio)
+    c.notes.forEach((midi, i) => {
+      hits.push({
+        time: place(when, 'piano', o.rng, o.humanize) + i * 0.005,
+        part: 'piano',
+        midi,
+        velocity: humanVelocity(c.vel * o.shape.pianoGain, o.rng, o.humanize),
+        duration: c.durationBeats * o.beatSec * 0.92,
+        pan: -0.22,
+      })
+    })
+  }
+
+  // Drum catches on the two response hits (Beat 3 and Beat 4&)
+  if (!o.userDrums && !o.drumSolo && head.chords.length > 0) {
+    for (const c of head.chords) {
+      const when = swungBeatOffset(c.beat, o.beatSec, o.ratio)
+      hits.push({
+        time: place(when, 'snare', o.rng, o.humanize),
+        part: 'drums',
+        drum: 'sidestick',
+        velocity: humanVelocity(0.52 * o.shape.drumBusGain, o.rng, o.humanize),
+        duration: 0.12,
+        pan: 0.16,
+      })
+    }
+  }
 }

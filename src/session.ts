@@ -104,7 +104,35 @@ export interface Session {
   byTune: Record<string, TuneMemory>
 }
 
-const KEY = 'momo-jazz-pro-v1'
+export const SESSION_KEY_V1 = 'momo-jazz-pro-v1'
+export const SESSION_KEY_V031 = 'momo-jazz-pro-v031'
+
+export function migrateSessionMixer(parsedMixer: Partial<Mixer> | undefined, baseMixer?: Mixer): Mixer {
+  const base = baseMixer ?? defaultMixer('bb')
+  if (!parsedMixer) return { ...base }
+  const migratedDrums =
+    parsedMixer.drums === 0.86 // v0.2 legacy default
+      ? DYNAMICS_CONFIG.voicing.defaultDrumBusGain
+      : (parsedMixer.drums ?? base.drums)
+
+  const legacyRide = parsedMixer.drumMix?.ride
+  const migratedRide =
+    legacyRide === 0.55 || legacyRide === 0.38 // v0.2 (0.55) or v0.3 (0.38) old default
+      ? DYNAMICS_CONFIG.voicing.defaultRideFaderGain
+      : (legacyRide ?? DEFAULT_DRUM_MIX.ride)
+
+  return {
+    ...base,
+    ...parsedMixer,
+    drums: migratedDrums,
+    mute: { ...base.mute, ...parsedMixer.mute },
+    drumMix: {
+      ...DEFAULT_DRUM_MIX,
+      ...parsedMixer.drumMix,
+      ride: migratedRide,
+    },
+  }
+}
 
 export function freshSession(): Session {
   return {
@@ -133,11 +161,16 @@ export function freshSession(): Session {
 
 export function loadSession(): Session {
   try {
-    const raw = localStorage.getItem(KEY)
+    let raw = localStorage.getItem(SESSION_KEY_V031)
+    let isMigrating = false
+    if (!raw) {
+      raw = localStorage.getItem(SESSION_KEY_V1)
+      if (raw) isMigrating = true
+    }
     if (!raw) return freshSession()
     const parsed = JSON.parse(raw) as Partial<Session>
     const base = freshSession()
-    return {
+    const session: Session = {
       ...base,
       ...parsed,
       repeats: parsed.repeats === undefined ? null : parsed.repeats,
@@ -145,13 +178,12 @@ export function loadSession(): Session {
       fillsMode: parsed.fillsMode ?? 'section',
       swingRatioOverride: parsed.swingRatioOverride === undefined ? null : parsed.swingRatioOverride,
       subdivision: parsed.subdivision ?? '8ths',
-      mixer: {
-        ...base.mixer,
-        ...parsed.mixer,
-        mute: { ...base.mixer.mute, ...parsed.mixer?.mute },
-        drumMix: { ...DEFAULT_DRUM_MIX, ...parsed.mixer?.drumMix },
-      },
+      mixer: migrateSessionMixer(parsed.mixer, base.mixer),
     }
+    if (isMigrating) {
+      saveSession(session)
+    }
+    return session
   } catch {
     return freshSession()
   }
@@ -159,7 +191,7 @@ export function loadSession(): Session {
 
 export function saveSession(session: Session): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(session))
+    localStorage.setItem(SESSION_KEY_V031, JSON.stringify(session))
   } catch {
     /* private mode */
   }

@@ -30,7 +30,6 @@ export function effectiveSwingRatioR(
   customRatioR: number | null = null,
   subdivision: SubdivisionMode = '8ths',
 ): number {
-  if (subdivision === '16th-straight') return 1.0
   return customRatioR != null ? Math.max(1.0, Math.min(3.5, customRatioR)) : defaultSwingRatioR(bpm, style, subdivision)
 }
 
@@ -59,14 +58,29 @@ export function swungBeatOffset(beatPos: number, beatSec: number, ratio: number)
 
 /**
  * Offset of a 16th-note index (0..15) inside a 4/4 bar.
- * When `subRatio` (fraction r/(r+1)) is provided (default 0.5 = straight 16ths),
- * the odd 16th inside each 8th-note pair sits at `subRatio` of that half-beat.
+ * When `eighthRatio` is provided, 8th note boundaries maintain swing.
+ * `subRatio` divides each 8th note duration (default 0.5 = straight 16ths).
  */
-export function sixteenthOffset(index: number, beatSec: number, subRatio = 0.5): number {
-  const halfBeatSec = beatSec / 2
-  const eighthIndex = Math.floor(index / 2)
-  const isOdd16th = index % 2 === 1
-  return eighthIndex * halfBeatSec + (isOdd16th ? halfBeatSec * subRatio : 0)
+export function sixteenthOffset(
+  index: number,
+  beatSec: number,
+  subRatio = 0.5,
+  eighthRatio = 0.5,
+): number {
+  const beatIndex = Math.floor(index / 4)
+  const inBeat = index % 4
+  const long8th = beatSec * eighthRatio
+  const short8th = beatSec * (1 - eighthRatio)
+
+  if (inBeat === 0) {
+    return beatIndex * beatSec
+  } else if (inBeat === 1) {
+    return beatIndex * beatSec + long8th * subRatio
+  } else if (inBeat === 2) {
+    return beatIndex * beatSec + long8th
+  } else {
+    return beatIndex * beatSec + long8th + short8th * subRatio
+  }
 }
 
 export type Pocket = 'ride' | 'hat' | 'kick' | 'snare' | 'ghost' | 'bass' | 'piano' | 'guitar' | 'click' | 'brush'

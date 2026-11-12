@@ -6,7 +6,7 @@ import { CHARTS } from '../session.ts'
 import type { DynamicsMode } from '../dynamics.ts'
 import type { ChartId, ClickMode, DrumMix, Mixer, StyleId } from '../types.ts'
 import { STYLE_LABEL } from '../data/tunes.ts'
-import type { FillsMode, SubdivisionMode } from '../engine/dynamicsConfig.ts'
+import { DYNAMICS_CONFIG, type FillsMode, type SubdivisionMode } from '../engine/dynamicsConfig.ts'
 import { effectiveSwingRatioR } from '../feel.ts'
 
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
@@ -204,9 +204,9 @@ export function PracticeSheet({
       <div class="swing-slider-wrap">
         <input
           type="range"
-          min="1.0"
-          max="3.5"
-          step="0.05"
+          min={DYNAMICS_CONFIG.swing.sliderMin}
+          max={DYNAMICS_CONFIG.swing.sliderMax}
+          step={DYNAMICS_CONFIG.swing.sliderStep}
           value={currentRatio}
           aria-label="Swing 比率"
           onInput={(e) =>
@@ -214,10 +214,11 @@ export function PracticeSheet({
           }
         />
         <div class="slider-marks">
-          <span onClick={() => onChange({ swingRatioOverride: 1.0 })}>1:1 平八分</span>
-          <span onClick={() => onChange({ swingRatioOverride: 1.7 })}>1.7:1 快 Swing</span>
-          <span onClick={() => onChange({ swingRatioOverride: 2.0 })}>2:1 三连音</span>
-          <span onClick={() => onChange({ swingRatioOverride: 2.8 })}>2.8:1 深摇摆</span>
+          {DYNAMICS_CONFIG.swing.referenceMarks.map((m) => (
+            <span key={m.ratio} onClick={() => onChange({ swingRatioOverride: m.ratio })}>
+              {m.label}
+            </span>
+          ))}
         </div>
         {!isAutoSwing && (
           <button
