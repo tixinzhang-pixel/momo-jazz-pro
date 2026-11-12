@@ -1,6 +1,15 @@
+import {
+  DYNAMICS_CONFIG,
+  dbToGain,
+  type FillsMode,
+  type PlayingMode,
+} from './engine/dynamicsConfig.ts'
+
 export type DynamicsMode = 'auto' | 'low' | 'med' | 'high'
 
 export type ChorusRole = 'head' | 'build' | 'shout' | 'out'
+
+export type SetupStrength = 'none' | 'light' | 'medium' | 'strong'
 
 export interface ShapeInput {
   mode: DynamicsMode
@@ -14,14 +23,49 @@ export interface ShapeInput {
   handoff: boolean
   bandTurn: boolean
   barInTurn: number
+  pianoSolo?: boolean
+  fillsMode?: FillsMode
 }
 
 export interface MusicalShape {
-  /** Multiply written velocities by this. */
+  /** Overall band/drum level multiplier (backward-compatible). */
   level: number
   /** Below ~0.7, ghost notes and extra piano attacks drop out. */
   density: number
   role: ChorusRole | 'fixed'
+  /** v0.3 A1 playing mode: HEAD vs SOLO. */
+  playingMode: PlayingMode
+  /** Soloist block index (0-based) when in SOLO mode. */
+  soloBlock: number
+  /** Chorus index within the 2-chorus soloist block (0 or 1). */
+  chorusInBlock: 0 | 1
+  /** True on chorus > 0 when a new 2-chorus soloist block starts. */
+  isNewSoloBlock: boolean
+  /** Setup strength in the last 2 beats of the bar (A3). */
+  setupStrength: SetupStrength
+  /** Per-voice linear gain multipliers computed from DYNAMICS_CONFIG dB offsets. */
+  drumBusGain: number
+  rideGain: number
+  snareCompGain: number
+  hatGain: number
+  kickSetupGain: number
+  snareSetupGain: number
+  bassGain: number
+  pianoGain: number
+}
+
+/**
+ * A1: Determine HEAD vs SOLO playing mode.
+ * - HEAD applies to the first chorus and the last chorus when loop count >= 3.
+ * - When loop count is 2, only chorus 1 (index 0) is HEAD.
+ * - When loop count is 1, HEAD is used.
+ * - SOLO applies to all other choruses.
+ */
+export function playingModeAt(chorus: number, repeats: number | null): PlayingMode {
+  if (repeats != null && repeats <= 1) return 'HEAD'
+  if (chorus <= 0) return 'HEAD'
+  if (repeats != null && repeats >= 3 && chorus >= repeats - 1) return 'HEAD'
+  return 'SOLO'
 }
 
 export function chorusRole(chorus: number, repeats: number | null): ChorusRole {
@@ -48,73 +92,246 @@ export function stepRepeats(current: number | null, dir: -1 | 1): number | null 
   return next
 }
 
+/**
+ * A3: Determine section boundary setup strength for the current bar.
+ * For a 32-bar chorus (1-based bars):
+ * - Bars 4, 12, 20, 28 -> 'none' (unless fillsMode === 'every4')
+ * - Bar 8 -> 'light' (drum bus +1-2 dB in beats 3-4)
+ * - Bar 16 -> 'medium' (drums +3 dB, snare +6 dB in last 2 beats)
+ * - Bar 24 & Bar 32 -> 'strong' (drums +6-8 dB, snare +12-16 dB, kick +7-11 dB in last 2 beats)
+ * For other forms (e.g. 12-bar blues, 16-bar tune), apply the same idea by phrase position:
+ * - Strong setup into the last phrase and into the next chorus
+ * - Medium at the form midpoint
+ * - No fills at 4-bar points by default in 'section' mode.
+ */
+export function setupStrengthAt(
+  barIndex: number,
+  form: number,
+  fillsMode: FillsMode = 'section',
+): SetupStrength {
+  if (fillsMode === 'off') return 'none'
+  const bar1 = barIndex + 1 // 1-based bar number
+
+  if (form === 32) {
+    if (bar1 === 24 || bar1 === 32) return 'strong'
+    if (bar1 === 16) return 'medium'
+    if (bar1 === 8) return 'light'
+    if (fillsMode === 'every4' && bar1 % 4 === 0) return 'light'
+    return 'none'
+  }
+
+  if (form === 12) {
+    // 12-bar blues: bar 12 is chorus end (strong), bar 8 is into last phrase (strong), bar 4 is midpoint/first phrase end (medium)
+    if (bar1 === 12 || bar1 === 8) return 'strong'
+    if (bar1 === 4) return fillsMode === 'every4' ? 'medium' : 'light'
+    return 'none'
+  }
+
+  if (form === 16) {
+    if (bar1 === 16 || bar1 === 12) return 'strong'
+    if (bar1 === 8) return 'medium'
+    if (bar1 === 4) return fillsMode === 'every4' ? 'light' : 'none'
+    return 'none'
+  }
+
+  // Generic form scaling
+  if (bar1 === form) return 'strong'
+  const threeQuarters = Math.round((form * 3) / 4)
+  const half = Math.round(form / 2)
+  const quarter = Math.round(form / 4)
+  if (bar1 === threeQuarters) return 'strong'
+  if (bar1 === half) return 'medium'
+  if (bar1 === quarter) return 'light'
+  if (fillsMode === 'every4' && bar1 % 4 === 0) return 'light'
+  return 'none'
+}
+
 export function musicalShape(input: ShapeInput): MusicalShape {
+  const cfg = DYNAMICS_CONFIG
   const role = input.mode === 'auto' ? chorusRole(input.chorus, input.repeats) : 'fixed'
-  let level = fixedLevel(input.mode)
-  let density = fixedDensity(input.mode)
+  const playingMode: PlayingMode =
+    input.mode === 'low'
+      ? 'HEAD'
+      : input.mode === 'med' || input.mode === 'high'
+        ? 'SOLO'
+        : playingModeAt(input.chorus, input.repeats)
+
+  // Soloist block math (A2): SOLO starts at chorus 1 (0-based index 1)
+  const soloChorusIndex = Math.max(0, input.chorus - 1)
+  const soloBlock = Math.floor(soloChorusIndex / cfg.blocks.chorusesPerBlock)
+  const chorusInBlock = (soloChorusIndex % cfg.blocks.chorusesPerBlock) as 0 | 1
+  const isNewSoloBlock = playingMode === 'SOLO' && chorusInBlock === 0 && input.chorus >= 1
+
+  let drumBusDb = 0
+  let rideDb = 0
+  let snareCompDb = 0
+  let hatDb = 0
+  let density = 0.78
+
   if (input.mode === 'auto') {
-    level = autoLevel(input, role as ChorusRole)
-    density = autoDensity(input, role as ChorusRole)
+    if (playingMode === 'HEAD') {
+      // A1: HEAD mode
+      drumBusDb = cfg.modes.head.drumBusDbOffset // -4.5 dB below SOLO average
+      rideDb = cfg.modes.head.rideDbOffset // -8.0 dB below SOLO ride
+      snareCompDb = cfg.modes.head.snareCompDbOffset // 0 dB base
+      hatDb = cfg.modes.head.hatDbOffset
+      density = 0.54
+
+      // A2: Final chorus (out-head) settles 1-2 dB lower for the last 4 bars before ending chord
+      if (role === 'out' && input.barIndex >= Math.max(0, input.form - 4)) {
+        drumBusDb += cfg.blocks.outHeadLast4BarsDb
+        rideDb += cfg.blocks.outHeadLast4BarsDb
+        snareCompDb += cfg.blocks.outHeadLast4BarsDb
+        density = 0.44
+      }
+    } else {
+      // A1 & A2: SOLO mode with 2-chorus soloist blocks
+      // Block start steps up +1.5 dB per new block; 2nd chorus in block adds +2.2 dB drum bus and +3.5 dB ride/snare
+      const blockStartOverHeadDb = Math.min(
+        cfg.blocks.maxDrumBusOverHeadDb - cfg.blocks.secondChorusDrumBusDb,
+        3.2 + soloBlock * cfg.blocks.newBlockStepDb,
+      )
+      const inBlockBusDb = chorusInBlock === 1 ? cfg.blocks.secondChorusDrumBusDb : 0
+      const totalOverHeadDb = Math.min(cfg.blocks.maxDrumBusOverHeadDb, blockStartOverHeadDb + inBlockBusDb)
+
+      drumBusDb = cfg.modes.head.drumBusDbOffset + totalOverHeadDb
+      rideDb =
+        cfg.modes.solo.rideDbOffset +
+        soloBlock * cfg.blocks.newBlockStepDb +
+        (chorusInBlock === 1 ? cfg.blocks.secondChorusRideDb : 0)
+      snareCompDb = Math.min(
+        cfg.modes.solo.snareCompPeakDb,
+        cfg.modes.solo.snareCompBlock1Db +
+          soloBlock * cfg.blocks.newBlockSnareStepDb +
+          (chorusInBlock === 1 ? cfg.blocks.secondChorusSnareDb : 0),
+      )
+      hatDb = cfg.modes.solo.hatDbOffset
+      density = Math.min(0.98, 0.76 + soloBlock * 0.06 + chorusInBlock * 0.08)
+    }
+  } else {
+    // Fixed modes (low / med / high): keep A1/A3/A4 behaviour with constant block level
+    const overHead = cfg.blocks.fixedModeOverHeadDb[input.mode]
+    drumBusDb = cfg.modes.head.drumBusDbOffset + overHead
+    if (input.mode === 'low') {
+      rideDb = cfg.modes.head.rideDbOffset
+      snareCompDb = cfg.modes.head.snareCompDbOffset
+      hatDb = cfg.modes.head.hatDbOffset
+      density = 0.45
+    } else if (input.mode === 'med') {
+      rideDb = 0
+      snareCompDb = cfg.modes.solo.snareCompBlock1Db
+      hatDb = 0
+      density = 0.78
+    } else {
+      rideDb = cfg.blocks.secondChorusRideDb
+      snareCompDb = cfg.modes.solo.snareCompPeakDb * 0.8
+      hatDb = 0
+      density = 0.96
+    }
   }
 
-  const phrase = phraseFactor(input.barIndex)
-  const phraseWeight = input.mode === 'auto' ? 1 : 0.4
-  level *= 1 + (phrase - 1) * phraseWeight
-
-  if (input.section === 'B' || input.section === 'C') {
-    level *= 1.04
-    density = Math.min(1, density + 0.05)
+  // Optional "quiet soloist" block for piano solo in trading (A2)
+  if (input.pianoSolo) {
+    drumBusDb += cfg.blocks.quietSoloist.drumBusDb
+    snareCompDb += cfg.blocks.quietSoloist.snareCompDb
+    rideDb += cfg.blocks.quietSoloist.rideDb
+    density = Math.min(density, 0.5)
   }
 
+  // A3: Early bars (bars 2-15 in a 32-bar chorus, i.e. barIndex 1..14) are the quietest part of the chorus
+  const bar1 = input.barIndex + 1
+  if (input.form >= 24 && bar1 >= 2 && bar1 <= 15 && bar1 !== 8) {
+    snareCompDb += cfg.sections.earlyBarsQuietSnareDb
+    drumBusDb += cfg.sections.earlyBarsQuietDrumBusDb
+  } else if (input.form < 24 && bar1 >= 2 && bar1 <= Math.floor(input.form * 0.45) && bar1 % 4 !== 0) {
+    snareCompDb += cfg.sections.earlyBarsQuietSnareDb * 0.65
+    drumBusDb += cfg.sections.earlyBarsQuietDrumBusDb * 0.65
+  }
+
+  // A3: Bridge lift (bars 17-24 or B/C section): +1-3 dB on drum bus, slightly denser comping
+  const isBridge =
+    input.section === 'B' ||
+    input.section === 'C' ||
+    (input.form === 32 && bar1 >= 17 && bar1 <= 24)
+  if (isBridge) {
+    drumBusDb += cfg.sections.bridgeLift.drumBusDb
+    density = Math.min(1, density * cfg.sections.bridgeLift.compDensityMultiplier)
+  }
+
+  // A3: Section setups (applied to the last 2 beats of the bar in arrange.ts, and reflected in bar shape)
+  const setupStrength = setupStrengthAt(input.barIndex, input.form, input.fillsMode ?? 'section')
+  let setupDrumDb = 0
+  let setupSnareDb = 0
+  let setupKickDb = 0
+  if (setupStrength === 'light') {
+    setupDrumDb = cfg.sections.bar8Setup.drumBusDb
+    setupSnareDb = cfg.sections.bar8Setup.snareDb
+    setupKickDb = cfg.sections.bar8Setup.kickDb
+  } else if (setupStrength === 'medium') {
+    setupDrumDb = cfg.sections.bar16Setup.drumBusDb
+    setupSnareDb = cfg.sections.bar16Setup.snareDb
+    setupKickDb = cfg.sections.bar16Setup.kickDb
+  } else if (setupStrength === 'strong') {
+    setupDrumDb = cfg.sections.strongSetup.drumBusDb
+    setupSnareDb = cfg.sections.strongSetup.snareDb
+    setupKickDb = cfg.sections.strongSetup.kickDb
+  }
+
+  // A6: Piano follows block intensity at half the dB change of drums
+  const drumDeltaOverHeadDb = drumBusDb - cfg.modes.head.drumBusDbOffset
+  let pianoDb = drumDeltaOverHeadDb * cfg.piano.blockIntensityFollowRatio - 1.5
+
+  // A5: Bass level stays flat across the whole tune (max +-2 dB between HEAD and SOLO peak)
+  let bassDb = Math.max(
+    -cfg.bass.headToSoloMaxDiffDb,
+    Math.min(cfg.bass.headToSoloMaxDiffDb, drumDeltaOverHeadDb * 0.15),
+  )
+
+  // A7: Trading refinements
   if (input.userTurn) {
-    level *= input.handoff ? 0.84 : 0.56
-    density *= input.handoff ? 0.72 : 0.38
-  } else if (input.bandTurn) {
+    if (input.handoff) {
+      drumBusDb += cfg.trading.userTurnOverallDb * 0.5
+      snareCompDb += cfg.trading.userTurnSnareDb * 0.5
+      rideDb += cfg.trading.userTurnRideDb * 0.5
+      pianoDb += cfg.trading.userTurnPianoDb * 0.5
+      density *= 0.72
+    } else {
+      drumBusDb += cfg.trading.userTurnOverallDb
+      snareCompDb += cfg.trading.userTurnSnareDb
+      rideDb += cfg.trading.userTurnRideDb
+      pianoDb += cfg.trading.userTurnPianoDb
+      bassDb += cfg.trading.userTurnBassDb // 0 dB: bass stays at normal level
+      density *= 0.38
+    }
+  } else if (input.bandTurn && !input.pianoSolo) {
     const step = Math.min(Math.max(input.barInTurn, 0), 7)
-    level *= 0.86 + step * 0.045
-    density = Math.min(1, density * (0.8 + step * 0.04))
+    drumBusDb += -1.0 + step * 0.35
+    density = Math.min(1, density * (0.85 + step * 0.03))
   }
+
+  // Backward-compatible scalar `level` reflecting overall band/drum contour + phrase arch
+  const phrase = phraseFactor(input.barIndex)
+  const phraseWeight = input.mode === 'auto' ? 0.5 : 0.25
+  const baseLevel = dbToGain(drumBusDb) * 0.92 * (1 + (phrase - 1) * phraseWeight)
 
   return {
-    level: clamp(level, 0.32, 1.22),
+    level: clamp(baseLevel, 0.32, 1.35),
     density: clamp(density, 0.22, 1),
     role,
+    playingMode,
+    soloBlock,
+    chorusInBlock,
+    isNewSoloBlock,
+    setupStrength,
+    drumBusGain: clamp(dbToGain(drumBusDb), 0.25, 1.8),
+    rideGain: clamp(dbToGain(drumBusDb + rideDb + cfg.voicing.rideExtraAttenuationDb), 0.12, 1.5),
+    snareCompGain: clamp(dbToGain(drumBusDb + snareCompDb * 0.55), 0.1, 2.2),
+    hatGain: clamp(dbToGain(drumBusDb + hatDb), 0.25, 1.5),
+    kickSetupGain: clamp(dbToGain(setupDrumDb + setupKickDb * 0.65), 1.0, 3.2),
+    snareSetupGain: clamp(dbToGain(setupDrumDb + setupSnareDb * 0.65), 1.0, 3.5),
+    bassGain: clamp(dbToGain(bassDb), 0.82, 1.18),
+    pianoGain: clamp(dbToGain(pianoDb), 0.45, 1.45),
   }
-}
-
-function fixedLevel(mode: DynamicsMode): number {
-  if (mode === 'low') return 0.62
-  if (mode === 'high') return 1.05
-  if (mode === 'med') return 0.84
-  return 0.84
-}
-
-function fixedDensity(mode: DynamicsMode): number {
-  if (mode === 'low') return 0.42
-  if (mode === 'high') return 1
-  if (mode === 'med') return 0.78
-  return 0.78
-}
-
-function autoLevel(input: ShapeInput, role: ChorusRole): number {
-  if (role === 'head') return 0.64
-  if (role === 'shout') return 1.12
-  if (role === 'out') {
-    const span = Math.max(1, input.form - 1)
-    const pos = input.barIndex / span
-    return pos < 0.45 ? 1.02 : 0.66
-  }
-  return 0.9 + Math.min(input.chorus, 3) * 0.08
-}
-
-function autoDensity(input: ShapeInput, role: ChorusRole): number {
-  if (role === 'head') return 0.58
-  if (role === 'shout') return 0.96
-  if (role === 'out') {
-    const span = Math.max(1, input.form - 1)
-    return input.barIndex / span < 0.45 ? 0.84 : 0.5
-  }
-  return 0.7 + Math.min(input.chorus, 3) * 0.06
 }
 
 /** Relax at the top of a phrase, lean into the end of each 4 and the end of each 8. */

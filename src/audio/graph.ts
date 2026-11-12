@@ -1,5 +1,6 @@
 import type { DrumMix } from '../types.ts'
 import { DEFAULT_DRUM_MIX } from '../session.ts'
+import { DYNAMICS_CONFIG } from '../engine/dynamicsConfig.ts'
 
 export interface DrumKit {
   ride: GainNode
@@ -63,14 +64,19 @@ export function createGraph(ctx: BaseAudioContext): Graph {
     return gain
   }
 
-  const drums = bus(0.2)
-  const piece = () => {
+  const drums = bus(0.18)
+  const rideFilter = ctx.createBiquadFilter()
+  rideFilter.type = 'highshelf'
+  rideFilter.frequency.value = DYNAMICS_CONFIG.voicing.rideHighShelfHz
+  rideFilter.gain.value = DYNAMICS_CONFIG.voicing.rideHighShelfDb
+  rideFilter.connect(drums)
+  const piece = (dest: AudioNode = drums) => {
     const gain = ctx.createGain()
-    gain.connect(drums)
+    gain.connect(dest)
     return gain
   }
   const kit: DrumKit = {
-    ride: piece(),
+    ride: piece(rideFilter),
     hat: piece(),
     snare: piece(),
     kick: piece(),

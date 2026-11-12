@@ -1,4 +1,18 @@
-export type StyleId = 'swing' | 'up' | 'ballad' | 'bossa'
+export type StyleId = 'swing' | 'up' | 'ballad' | 'bossa' | 'shuffle'
+
+export type TuneTag = 'jazz-standard' | 'pop' | 'momo-original' | 'teaching'
+
+export type ReviewStatus = 'pending-dean' | 'approved'
+
+export type TuneSourceKind = 'momo-written'
+
+export interface FormSectionSpec {
+  label: string
+  bars: number
+  repeats?: number
+  endings?: number
+  coda?: boolean
+}
 
 export type RoleId = 'drums' | 'bass' | 'piano' | 'guitar' | 'bb' | 'eb' | 'f' | 'vocal'
 
@@ -55,16 +69,26 @@ export interface ChartBar {
   section: string | null
   activeSection: string
   chords: ChartSlot[]
+  repeatStart?: boolean
+  repeatEnd?: boolean
+  ending?: 1 | 2
+  coda?: boolean
 }
 
 export interface Tune {
   id: string
   title: string
   titleEn: string
+  composer?: string
   blurb: string
   key: string
   style: StyleId
   bpm: number
+  timeSignature: '4/4' | '3/4'
+  form: FormSectionSpec[]
+  tags: TuneTag[]
+  review: ReviewStatus
+  source: TuneSourceKind
   /** 12-bar blues forms swap who starts a trade on the next chorus, because 12 / 4 is odd. */
   blues: boolean
   voicing?: 'quartal'

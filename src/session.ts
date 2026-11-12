@@ -1,12 +1,20 @@
 import type { DynamicsMode } from './dynamics.ts'
+import {
+  DYNAMICS_CONFIG,
+  type FillsMode,
+  type SubdivisionMode,
+} from './engine/dynamicsConfig.ts'
 import type { ChartId, ClickMode, DrumMix, Mixer, RoleId, StyleId } from './types.ts'
 
-/** Ride sits about −5 dB under the rest of the kit. Snare and feathered kick are a touch forward. */
+/**
+ * v0.3 A4: Ride sits about -8 dB under unity (~3 dB lower than v0.2's 0.55) so the ride band
+ * sits 2-3 dB below the snare band in SOLO. Snare and kick sit slightly above unity.
+ */
 export const DEFAULT_DRUM_MIX: DrumMix = {
-  ride: 0.55,
-  hat: 1,
-  snare: 1.18,
-  kick: 1.26,
+  ride: DYNAMICS_CONFIG.voicing.defaultRideFaderGain, // 0.38 (~ -8.4 dB)
+  hat: 0.92,
+  snare: 1.24,
+  kick: 1.18,
   brush: 1,
 }
 
@@ -47,12 +55,12 @@ export function defaultMixer(role: RoleId): Mixer {
   if (part) mute[part] = true
   return {
     master: 0.9,
-    drums: 0.86,
-    bass: 0.8,
-    piano: 0.7,
+    drums: DYNAMICS_CONFIG.voicing.defaultDrumBusGain, // 0.48 (about 3-5 dB below bass)
+    bass: 0.86,
+    piano: DYNAMICS_CONFIG.piano.defaultMixerGain, // 0.82 (audible under drums)
     guitar: 0.46,
     click: 0.62,
-    reverb: 0.28,
+    reverb: 0.24,
     mute,
     drumMix: { ...DEFAULT_DRUM_MIX },
   }
@@ -62,6 +70,8 @@ export interface TuneMemory {
   bpm: number
   transpose: number
   style: StyleId
+  swingRatioOverride?: number | null
+  subdivision?: SubdivisionMode
 }
 
 export interface Session {
@@ -77,6 +87,15 @@ export interface Session {
   /** null = keep playing. 1–30 = that many passes, then a button and stop. */
   repeats: number | null
   dynamics: DynamicsMode
+  /** A3 Fills setting: 'section' (default), 'every4', or 'off'. */
+  fillsMode: FillsMode
+  /**
+   * Scope B Swing ratio override (1.0 to 3.5).
+   * null = Auto (follows per-style, per-tempo default curve).
+   */
+  swingRatioOverride: number | null
+  /** Scope B Subdivision toggle: '8ths' | '16th-swing' | '16th-straight'. */
+  subdivision: SubdivisionMode
   tuneId: string
   bpm: number
   transpose: number
@@ -100,6 +119,9 @@ export function freshSession(): Session {
     autoBpm: false,
     repeats: null,
     dynamics: 'auto',
+    fillsMode: 'section',
+    swingRatioOverride: null,
+    subdivision: '8ths',
     tuneId: 'jazz-blues-f',
     bpm: 132,
     transpose: 0,
@@ -120,6 +142,9 @@ export function loadSession(): Session {
       ...parsed,
       repeats: parsed.repeats === undefined ? null : parsed.repeats,
       dynamics: parsed.dynamics ?? 'auto',
+      fillsMode: parsed.fillsMode ?? 'section',
+      swingRatioOverride: parsed.swingRatioOverride === undefined ? null : parsed.swingRatioOverride,
+      subdivision: parsed.subdivision ?? '8ths',
       mixer: {
         ...base.mixer,
         ...parsed.mixer,

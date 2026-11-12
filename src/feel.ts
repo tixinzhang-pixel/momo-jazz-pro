@@ -1,30 +1,40 @@
 import type { StyleId } from './types.ts'
+import {
+  defaultSwingRatioR,
+  ratioToBeatFraction,
+  type SubdivisionMode,
+} from './engine/dynamicsConfig.ts'
 
-/** Long-eighth share of the beat. 0.5 is straight, 0.67 is a triplet. Bossa stays straight. */
-export function swingRatio(bpm: number, style: StyleId): number {
-  if (style === 'bossa') return 0.5
-  const anchors: [number, number][] = [
-    [40, 0.7],
-    [60, 0.68],
-    [100, 0.64],
-    [140, 0.6],
-    [180, 0.555],
-    [220, 0.53],
-    [280, 0.51],
-  ]
-  if (bpm <= anchors[0][0]) return anchors[0][1]
-  for (let i = 1; i < anchors.length; i++) {
-    const [b0, r0] = anchors[i - 1]
-    const [b1, r1] = anchors[i]
-    if (bpm <= b1) {
-      const t = (bpm - b0) / (b1 - b0)
-      return r0 + (r1 - r0) * t
-    }
-  }
-  return anchors[anchors.length - 1][1]
+/**
+ * Long-eighth share of the beat (fraction r/(r+1)).
+ * 0.5 is straight (1:1), ~0.667 is triplet (2:1), ~0.737 is 2.8:1.
+ * When `customRatioR` is provided (user moved the Swing slider, turning Auto off),
+ * it converts `customRatioR` via r/(r+1); otherwise uses the per-style, per-tempo curve.
+ */
+export function swingRatio(
+  bpm: number,
+  style: StyleId,
+  customRatioR: number | null = null,
+  subdivision: SubdivisionMode = '8ths',
+): number {
+  const r = customRatioR != null ? customRatioR : defaultSwingRatioR(bpm, style, subdivision)
+  return ratioToBeatFraction(r)
 }
 
-/** Offset of an eighth-note index inside a 4/4 bar. Offbeats land late when ratio > 0.5. */
+/**
+ * Resolve the effective long:short ratio r (1.0 to 3.5) for UI display and scheduling.
+ */
+export function effectiveSwingRatioR(
+  bpm: number,
+  style: StyleId,
+  customRatioR: number | null = null,
+  subdivision: SubdivisionMode = '8ths',
+): number {
+  if (subdivision === '16th-straight') return 1.0
+  return customRatioR != null ? Math.max(1.0, Math.min(3.5, customRatioR)) : defaultSwingRatioR(bpm, style, subdivision)
+}
+
+/** Offset of an eighth-note index (0..7) inside a 4/4 bar. Offbeats land at fraction `ratio` of the beat. */
 export function eighthOffset(index: number, beatSec: number, ratio: number): number {
   const beat = Math.floor(index / 2)
   const off = index % 2 === 1
@@ -32,8 +42,31 @@ export function eighthOffset(index: number, beatSec: number, ratio: number): num
   return beat * beatSec + (off ? long : 0)
 }
 
-export function sixteenthOffset(index: number, beatSec: number): number {
-  return index * (beatSec / 4)
+/**
+ * Offset of a fractional beat position (e.g. 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5) with swing applied to off-beats.
+ */
+export function swungBeatOffset(beatPos: number, beatSec: number, ratio: number): number {
+  const wholeBeat = Math.floor(beatPos + 1e-6)
+  const frac = beatPos - wholeBeat
+  if (Math.abs(frac - 0.5) < 0.08) {
+    return wholeBeat * beatSec + beatSec * ratio
+  }
+  if (Math.abs(frac) < 0.05) {
+    return wholeBeat * beatSec
+  }
+  return beatPos * beatSec
+}
+
+/**
+ * Offset of a 16th-note index (0..15) inside a 4/4 bar.
+ * When `subRatio` (fraction r/(r+1)) is provided (default 0.5 = straight 16ths),
+ * the odd 16th inside each 8th-note pair sits at `subRatio` of that half-beat.
+ */
+export function sixteenthOffset(index: number, beatSec: number, subRatio = 0.5): number {
+  const halfBeatSec = beatSec / 2
+  const eighthIndex = Math.floor(index / 2)
+  const isOdd16th = index % 2 === 1
+  return eighthIndex * halfBeatSec + (isOdd16th ? halfBeatSec * subRatio : 0)
 }
 
 export type Pocket = 'ride' | 'hat' | 'kick' | 'snare' | 'ghost' | 'bass' | 'piano' | 'guitar' | 'click' | 'brush'
