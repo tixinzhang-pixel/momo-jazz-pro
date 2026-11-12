@@ -385,10 +385,8 @@ const SOURCES: TuneSource[] = [
       Em7 | A7 | Em7 | A7 |
       Am7 | D7 | Abm7 | Db7 |
       Cmaj7 | % | Gm7 | C7 |
-      [B] Fmaj7 | % | G7 | % |
-      Em7 | % | A7 | % |
-      Am7 | % | D7 | % |
-      Dm7 | % | G7 | % |
+      [B] Gm7 C7 | Gm7 C7 | Fmaj7 | Fmaj7 |
+      Am7 D7 | Am7 D7 | G7 | G7 |
       [A] Dm7 | G7 | Dm7 | G7 |
       Em7 | A7 | Em7 | A7 |
       Am7 | D7 | Abm7 | Db7 |
@@ -483,7 +481,7 @@ const SOURCES: TuneSource[] = [
       Fm7 | % | % | % |
       Cm7 | % | % | % |
       F#m7b5 | % | B7alt | % |
-      Em7b5 | A7alt | Cm7 | % |
+      E7#9 | A7alt | Cm7 | % |
     `,
   },
   {
