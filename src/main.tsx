@@ -6,7 +6,6 @@ import '@fontsource/outfit/latin-400.css'
 import '@fontsource/outfit/latin-500.css'
 import '@fontsource/outfit/latin-600.css'
 import { registerSW } from 'virtual:pwa-register'
-import { renderBluesWav } from './audio/render.ts'
 import { App } from './app.tsx'
 import './styles.css'
 
@@ -20,6 +19,7 @@ declare global {
 
 window.__momo = {
   async renderBluesWav() {
+    const { renderBluesWav } = await import('./audio/render.ts')
     const rendered = await renderBluesWav()
     const bytes = new Uint8Array(await rendered.blob.arrayBuffer())
     let binary = ''

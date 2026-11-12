@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { Engine, type Playhead } from './audio/engine.ts'
-import { renderTuneWav } from './audio/render.ts'
 import { findTune, STYLE_LABEL, TUNES } from './data/tunes.ts'
 import type { DynamicsMode } from './dynamics.ts'
 import { deviceSummary } from './feedback.ts'
@@ -142,16 +141,19 @@ export function App() {
       const choruses = Number(params.get('choruses')) || 2
       const targetTune = renderParam === '1' || renderParam === 'true' ? sessionRef.current.tuneId : renderParam
       console.log(`[Dev Render] Starting offline render for ${targetTune} (${choruses} choruses)...`)
-      void renderTuneWav({
-        tuneId: targetTune,
-        choruses,
-        bpm: sessionRef.current.bpm,
-        style: sessionRef.current.style,
-        dynamics: sessionRef.current.dynamics,
-        fillsMode: sessionRef.current.fillsMode,
-        swingRatioOverride: sessionRef.current.swingRatioOverride,
-        subdivision: sessionRef.current.subdivision,
-      })
+      void import('./audio/render.ts')
+        .then(({ renderTuneWav }) =>
+          renderTuneWav({
+            tuneId: targetTune,
+            choruses,
+            bpm: sessionRef.current.bpm,
+            style: sessionRef.current.style,
+            dynamics: sessionRef.current.dynamics,
+            fillsMode: sessionRef.current.fillsMode,
+            swingRatioOverride: sessionRef.current.swingRatioOverride,
+            subdivision: sessionRef.current.subdivision,
+          }),
+        )
         .then(({ blob, peak, seconds }) => {
           console.log(`[Dev Render] Done: ${seconds.toFixed(1)}s, peak=${peak.toFixed(3)}`)
           const url = URL.createObjectURL(blob)
@@ -376,6 +378,7 @@ export function App() {
         <AboutSheet
           tuneTitle={tune.title}
           onExportWav={async () => {
+            const { renderTuneWav } = await import('./audio/render.ts')
             const { blob, peak } = await renderTuneWav({
               tuneId: session.tuneId,
               choruses: session.repeats ?? 2,
