@@ -65,9 +65,9 @@ export const DYNAMICS_CONFIG = {
    */
   blocks: {
     chorusesPerBlock: 2,
-    /** Second chorus inside a block: +3.5 dB on ride and snare comping vs 1st chorus (So What ref B: +3.7 to +4.4 dB). */
-    secondChorusRideDb: 3.5,
-    secondChorusSnareDb: 3.5,
+    /** Second chorus inside a block: net ride level +3.8 dB vs 1st chorus (So What ref B: +3.7 to +4.4 dB; drum bus +2.2 dB + ride +1.6 dB). */
+    secondChorusRideDb: 1.6,
+    secondChorusSnareDb: 2.5,
     secondChorusDrumBusDb: 2.2,
     /** Each new block starts +1.5 dB above the previous block's start (So What ref A/B: +1-2 dB; drops 2 dB from prev peak). */
     newBlockStepDb: 1.5,

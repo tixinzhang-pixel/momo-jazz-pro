@@ -6,6 +6,8 @@ import { CHARTS } from '../session.ts'
 import type { DynamicsMode } from '../dynamics.ts'
 import type { ChartId, ClickMode, DrumMix, Mixer, StyleId } from '../types.ts'
 import { STYLE_LABEL } from '../data/tunes.ts'
+import type { FillsMode, SubdivisionMode } from '../engine/dynamicsConfig.ts'
+import { effectiveSwingRatioR } from '../feel.ts'
 
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
   return (
@@ -143,6 +145,10 @@ export function PracticeSheet({
   chart,
   style,
   dynamics,
+  fillsMode,
+  swingRatioOverride,
+  subdivision,
+  bpm,
   onChange,
   onClose,
 }: {
@@ -154,6 +160,10 @@ export function PracticeSheet({
   chart: ChartId
   style: StyleId
   dynamics: DynamicsMode
+  fillsMode: FillsMode
+  swingRatioOverride: number | null
+  subdivision: SubdivisionMode
+  bpm: number
   onChange: (partial: {
     countIn?: 0 | 1 | 2
     click?: ClickMode
@@ -163,9 +173,15 @@ export function PracticeSheet({
     chart?: ChartId
     style?: StyleId
     dynamics?: DynamicsMode
+    fillsMode?: FillsMode
+    swingRatioOverride?: number | null
+    subdivision?: SubdivisionMode
   }) => void
   onClose: () => void
 }) {
+  const currentRatio = effectiveSwingRatioR(bpm, style, swingRatioOverride, subdivision)
+  const isAutoSwing = swingRatioOverride == null
+
   return (
     <Sheet title="练习" onClose={onClose}>
       <p class="field-label">力度</p>
@@ -177,6 +193,93 @@ export function PracticeSheet({
         ))}
       </div>
       <p class="sheet-note">自动会按主题、独奏和最后一遍自己起伏。轻 / 中 / 强是整首一个力度。</p>
+
+      <div class="field-head">
+        <p class="field-label">律动（SWING 比率）</p>
+        <span class="ratio-badge">
+          <strong>{currentRatio.toFixed(2)} : 1</strong>
+          {isAutoSwing ? ' · 自动（风格默认）' : ' · 自定义'}
+        </span>
+      </div>
+      <div class="swing-slider-wrap">
+        <input
+          type="range"
+          min="1.0"
+          max="3.5"
+          step="0.05"
+          value={currentRatio}
+          aria-label="Swing 比率"
+          onInput={(e) =>
+            onChange({ swingRatioOverride: Number((e.target as HTMLInputElement).value) })
+          }
+        />
+        <div class="slider-marks">
+          <span onClick={() => onChange({ swingRatioOverride: 1.0 })}>1:1 平八分</span>
+          <span onClick={() => onChange({ swingRatioOverride: 1.7 })}>1.7:1 快 Swing</span>
+          <span onClick={() => onChange({ swingRatioOverride: 2.0 })}>2:1 三连音</span>
+          <span onClick={() => onChange({ swingRatioOverride: 2.8 })}>2.8:1 深摇摆</span>
+        </div>
+        {!isAutoSwing && (
+          <button
+            type="button"
+            class="text-btn reset-btn"
+            onClick={() => onChange({ swingRatioOverride: null })}
+          >
+            恢复风格默认
+          </button>
+        )}
+      </div>
+
+      <p class="field-label">微细分（SUBDIVISION）</p>
+      <div class="segment">
+        <button
+          type="button"
+          class={subdivision === '8ths' ? 'on' : ''}
+          onClick={() => onChange({ subdivision: '8ths' })}
+        >
+          八分音符
+        </button>
+        <button
+          type="button"
+          class={subdivision === '16th-swing' ? 'on' : ''}
+          onClick={() => onChange({ subdivision: '16th-swing' })}
+        >
+          十六分摇摆
+        </button>
+        <button
+          type="button"
+          class={subdivision === '16th-straight' ? 'on' : ''}
+          onClick={() => onChange({ subdivision: '16th-straight' })}
+        >
+          十六分平拍
+        </button>
+      </div>
+
+      <p class="field-label">鼓组加花（FILLS）</p>
+      <div class="segment">
+        <button
+          type="button"
+          class={fillsMode === 'section' ? 'on' : ''}
+          onClick={() => onChange({ fillsMode: 'section' })}
+        >
+          段落结尾（默认）
+        </button>
+        <button
+          type="button"
+          class={fillsMode === 'every4' ? 'on' : ''}
+          onClick={() => onChange({ fillsMode: 'every4' })}
+        >
+          每 4 小节
+        </button>
+        <button
+          type="button"
+          class={fillsMode === 'off' ? 'on' : ''}
+          onClick={() => onChange({ fillsMode: 'off' })}
+        >
+          关
+        </button>
+      </div>
+
       <p class="field-label">风格</p>
       <div class="segment">
         {(Object.keys(STYLE_LABEL) as StyleId[]).map((id) => (
@@ -259,15 +362,53 @@ export function FeedbackSheet({ context, onClose }: { context: Omit<FeedbackCont
   )
 }
 
-export function AboutSheet({ onClose }: { onClose: () => void }) {
+export function AboutSheet({
+  tuneTitle,
+  onExportWav,
+  onClose,
+}: {
+  tuneTitle?: string
+  onExportWav?: () => Promise<void> | void
+  onClose: () => void
+}) {
+  const [rendering, setRendering] = useState(false)
+  async function handleExport() {
+    if (!onExportWav || rendering) return
+    setRendering(true)
+    try {
+      await onExportWav()
+    } finally {
+      setRendering(false)
+    }
+  }
+
   return (
     <Sheet title="采样与版本" onClose={onClose}>
       <p class="about-version">Momo Jazz Pro · v{APP_VERSION}</p>
       <p>
-        鼓、低音提琴、钢琴、闷音吉他来自 Frank Wen 的 FluidR3 GM（MIT）。鼓的单音取自 WebAudioFont 对同一音源的提取；钢琴、贝斯和吉他的 MP3 来自 midi-js-soundfonts（CC BY 3.0）。
+        <strong>开源采样（总大小约 1.4 MB）：</strong>
+        鼓组、低音提琴、大钢琴、闷音吉他全部基于 Frank Wen 的 FluidR3 GM（MIT 许可）。鼓组单音文件取自 WebAudioFont 提取（MIT）；钢琴、贝斯和吉他的压缩音频来自 gleitz/midi-js-soundfonts（CC BY 3.0 许可）。
       </p>
-      <p>刷子的刷奏是程序合成的，不是采样。采样包可以整包替换，见 <span class="mono">public/samples/bank.json</span>。</p>
-      <p>曲库只有和弦进行，没有旋律和歌词，待教务复核。第一轮没有主题旋律。</p>
+      <p>
+        <strong>音色与 DSP 处理：</strong>
+        叮叮镲经由内建高架滤波（-2.5 dB @ 6 kHz）温和压暗高频，呈现爵士暗色特征；军鼓与吊镲支持多样本轮替（Round-robin）。抒情歌刷子为程序滤波白噪声实时合成，非静态采样。
+      </p>
+      <p>
+        <strong>离线与缓存：</strong>
+        采样按声部懒加载，初次播放即由 Service Worker 完整缓存，无网环境可直接离线练琴。
+      </p>
+      <p>
+        <strong>曲库说明：</strong>
+        仅包含标准和弦进行框架，不含旋律与歌词。新增曲目带有「待审」标记，待教务 Dean 复核确认。
+      </p>
+      {onExportWav && (
+        <div style={{ marginTop: '16px' }}>
+          <button type="button" class="solid" onClick={() => void handleExport()} disabled={rendering}>
+            {rendering ? '正在渲染离线音频...' : `导出《${tuneTitle ?? '当前曲目'}》离线评测 WAV`}
+          </button>
+          <p class="sheet-note">开发者评测专用：使用 OfflineAudioContext 快速渲染伴奏音频为标准 WAV，方便在 Audacity / demucs 中实测动态与分轨响度。</p>
+        </div>
+      )}
     </Sheet>
   )
 }

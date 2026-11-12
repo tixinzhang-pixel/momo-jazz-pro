@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { Engine, type Playhead } from './audio/engine.ts'
+import { renderTuneWav } from './audio/render.ts'
 import { findTune, STYLE_LABEL, TUNES } from './data/tunes.ts'
 import type { DynamicsMode } from './dynamics.ts'
 import { deviceSummary } from './feedback.ts'
@@ -34,6 +35,8 @@ function boot(): { session: Session; screen: Screen } {
       bpm: memory?.bpm ?? tune.bpm,
       style: memory?.style ?? tune.style,
       transpose: memory?.transpose ?? 0,
+      swingRatioOverride: memory?.swingRatioOverride ?? null,
+      subdivision: memory?.subdivision ?? '8ths',
     }
   }
   const screen: Screen = !session.role ? 'gate' : query && findTune(query) ? 'player' : 'library'
@@ -70,10 +73,23 @@ export function App() {
   function patch(partial: Partial<Session>) {
     const prev = sessionRef.current
     const next: Session = { ...prev, ...partial }
-    if (partial.bpm != null || partial.transpose != null || partial.style != null || partial.tuneId != null) {
+    if (
+      partial.bpm != null ||
+      partial.transpose != null ||
+      partial.style != null ||
+      partial.tuneId != null ||
+      partial.swingRatioOverride !== undefined ||
+      partial.subdivision != null
+    ) {
       next.byTune = {
         ...prev.byTune,
-        [next.tuneId]: { bpm: next.bpm, transpose: next.transpose, style: next.style },
+        [next.tuneId]: {
+          bpm: next.bpm,
+          transpose: next.transpose,
+          style: next.style,
+          swingRatioOverride: next.swingRatioOverride,
+          subdivision: next.subdivision,
+        },
       }
     }
     sessionRef.current = next
@@ -99,6 +115,9 @@ export function App() {
         autoBpm: current.autoBpm,
         repeats: current.repeats,
         dynamics: current.dynamics,
+        fillsMode: current.fillsMode,
+        swingRatioOverride: current.swingRatioOverride,
+        subdivision: current.subdivision,
       }
     }
     engine.current.onTempo = (bpm) => patch({ bpm })
@@ -114,6 +133,38 @@ export function App() {
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
+  }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const renderParam = params.get('render')
+    if (renderParam) {
+      const choruses = Number(params.get('choruses')) || 2
+      const targetTune = renderParam === '1' || renderParam === 'true' ? sessionRef.current.tuneId : renderParam
+      console.log(`[Dev Render] Starting offline render for ${targetTune} (${choruses} choruses)...`)
+      void renderTuneWav({
+        tuneId: targetTune,
+        choruses,
+        bpm: sessionRef.current.bpm,
+        style: sessionRef.current.style,
+        dynamics: sessionRef.current.dynamics,
+        fillsMode: sessionRef.current.fillsMode,
+        swingRatioOverride: sessionRef.current.swingRatioOverride,
+        subdivision: sessionRef.current.subdivision,
+      })
+        .then(({ blob, peak, seconds }) => {
+          console.log(`[Dev Render] Done: ${seconds.toFixed(1)}s, peak=${peak.toFixed(3)}`)
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `${targetTune}-${choruses}c-render.wav`
+          a.click()
+          URL.revokeObjectURL(url)
+        })
+        .catch((err) => {
+          console.error('[Dev Render] Failed:', err)
+        })
+    }
   }, [])
 
   useEffect(() => {
@@ -167,6 +218,8 @@ export function App() {
       bpm: memory?.bpm ?? next.bpm,
       style: memory?.style ?? next.style,
       transpose: memory?.transpose ?? 0,
+      swingRatioOverride: memory?.swingRatioOverride ?? null,
+      subdivision: memory?.subdivision ?? '8ths',
     })
     setLoop(null)
     setAnchor(null)
@@ -282,6 +335,10 @@ export function App() {
           chart={session.chart}
           style={session.style}
           dynamics={session.dynamics}
+          fillsMode={session.fillsMode}
+          swingRatioOverride={session.swingRatioOverride}
+          subdivision={session.subdivision}
+          bpm={session.bpm}
           onChange={(partial: {
             countIn?: 0 | 1 | 2
             click?: ClickMode
@@ -291,6 +348,9 @@ export function App() {
             chart?: ChartId
             style?: StyleId
             dynamics?: DynamicsMode
+            fillsMode?: import('./engine/dynamicsConfig.ts').FillsMode
+            swingRatioOverride?: number | null
+            subdivision?: import('./engine/dynamicsConfig.ts').SubdivisionMode
           }) => patch(partial)}
           onClose={() => setSheet(null)}
         />
@@ -312,7 +372,31 @@ export function App() {
           onClose={() => setSheet(null)}
         />
       )}
-      {sheet === 'about' && <AboutSheet onClose={() => setSheet(null)} />}
+      {sheet === 'about' && (
+        <AboutSheet
+          tuneTitle={tune.title}
+          onExportWav={async () => {
+            const { blob, peak } = await renderTuneWav({
+              tuneId: session.tuneId,
+              choruses: session.repeats ?? 2,
+              bpm: session.bpm,
+              style: session.style,
+              dynamics: session.dynamics,
+              fillsMode: session.fillsMode,
+              swingRatioOverride: session.swingRatioOverride,
+              subdivision: session.subdivision,
+            })
+            console.log(`Rendered ${session.tuneId} WAV, peak=${peak.toFixed(3)}`)
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `${session.tuneId}-v03-render.wav`
+            a.click()
+            URL.revokeObjectURL(url)
+          }}
+          onClose={() => setSheet(null)}
+        />
+      )}
     </main>
   )
 }

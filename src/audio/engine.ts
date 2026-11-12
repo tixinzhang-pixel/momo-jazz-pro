@@ -1,6 +1,7 @@
 import { arrangeBar, endingHits } from '../arrange.ts'
 import type { DynamicsMode } from '../dynamics.ts'
 import { passCompleted } from '../dynamics.ts'
+import type { FillsMode, SubdivisionMode } from '../engine/dynamicsConfig.ts'
 import type { ClickMode, Mixer, StyleId, TradeSettings, Tune } from '../types.ts'
 import { loadBank, type LoadedBank } from './bank.ts'
 import { applyDrumMix, createGraph, type Graph } from './graph.ts'
@@ -18,6 +19,9 @@ export interface Snapshot {
   autoBpm: boolean
   repeats: number | null
   dynamics: DynamicsMode
+  fillsMode?: FillsMode
+  swingRatioOverride?: number | null
+  subdivision?: SubdivisionMode
 }
 
 export interface Playhead {
@@ -231,6 +235,9 @@ export class Engine {
         humanize: true,
         dynamics: snap.dynamics,
         repeats: snap.repeats,
+        fillsMode: snap.fillsMode,
+        swingRatioOverride: snap.swingRatioOverride,
+        subdivision: snap.subdivision,
       })
       for (const hit of hits) playHit(this.ctx, this.graph, this.bank, this.book, hit, this.nextTime)
       const dur = beatSec * 4
