@@ -56,9 +56,9 @@ export const DYNAMICS_CONFIG = {
       snareCompPeakDb: 15.0,
       /**
        * Extra solo drum-bus trim against the v0.3.1 anchor (−4.5 + block curve).
-       * About −2 dB, so drums sit near −3 dB under bass in solo choruses.
+       * −3.7 dB keeps SOLO−HEAD near +4 after the snare-bus ceiling quieted the fills.
        */
-      drumBusDbOffset: -5.0,
+      drumBusDbOffset: -3.7,
     },
   },
 
@@ -108,7 +108,7 @@ export const DYNAMICS_CONFIG = {
     earlyBarsQuietDrumBusDb: -1.0,
     /** Bar 8 (end of A1): light setup only in beats 3-4: drum bus +1-2 dB (So What ref A/B). */
     bar8Setup: {
-      drumBusDb: 1.0,
+      drumBusDb: 1.7,
       snareDb: 1.5,
       kickDb: 1.0,
     },
@@ -125,7 +125,7 @@ export const DYNAMICS_CONFIG = {
     strongSetup: {
       drumBusDb: 2.2,
       snareDb: 18,
-      kickDb: -1.4,
+      kickDb: -9,
     },
     /** Bridge lift (bars 17-24 / B section): +1-3 dB on drum bus, slightly denser comping (So What ref A/B). */
     bridgeLift: {

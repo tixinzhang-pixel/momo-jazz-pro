@@ -487,6 +487,66 @@ describe('v0.3.2 config parameters each change the output', () => {
   })
 })
 
+describe('v0.3.2 snare bus ceiling', () => {
+  it('keeps snare-bus hits under the full-scale product on a strong fill', () => {
+    const tune = findTune('so-what')!
+    let maxProduct = 0
+    for (const chorus of [1, 2, 3, 4]) {
+      for (const bar of [7, 15, 23, 31]) {
+        const hits = arrangeBar({
+          tune,
+          barIndex: bar,
+          chorus,
+          playBar: chorus * 32 + bar,
+          bpm: 136,
+          style: 'swing',
+          transpose: 0,
+          trade: null,
+          click: 'off',
+          humanize: false,
+          repeats: 6,
+        })
+        for (const hit of hits) {
+          if (!hit.drum || !['snare', 'sidestick', 'tomL', 'tomM', 'tomH'].includes(hit.drum)) continue
+          maxProduct = Math.max(maxProduct, hit.velocity * (hit.gain ?? 1))
+        }
+      }
+    }
+    expect(maxProduct).toBeLessThanOrEqual(0.82)
+  })
+
+  it('schedules three solo piano attacks on every So What solo bar', () => {
+    const tune = findTune('so-what')!
+    for (const chorus of [1, 2, 3, 4]) {
+      for (let bar = 0; bar < 32; bar++) {
+        const hits = arrangeBar({
+          tune,
+          barIndex: bar,
+          chorus,
+          playBar: chorus * 32 + bar,
+          bpm: 136,
+          style: 'swing',
+          transpose: 0,
+          trade: null,
+          click: 'off',
+          humanize: true,
+          repeats: 6,
+        })
+        const times = hits.filter((hit) => hit.part === 'piano').map((hit) => hit.time).sort((a, b) => a - b)
+        let groups = 0
+        let last = -9
+        for (const time of times) {
+          if (time - last > 0.04) {
+            groups += 1
+            last = time
+          }
+        }
+        expect(groups).toBe(3)
+      }
+    }
+  })
+})
+
 describe('Satin Doll form', () => {
   it('writes the bridge in the same doubled bars as the A sections', () => {
     const tune = findTune('satin-doll')!

@@ -13,6 +13,7 @@ const fillsMode = process.argv[5] || 'section'
 const tradeOn = process.argv[6] === 'trade'
 const isolate = process.argv[7] && process.argv[7] !== '-' ? process.argv[7] : null
 const tap = process.argv[8] && process.argv[8] !== '-' ? process.argv[8] : null
+const chorusOrigin = Number(process.argv[9] || 0)
 
 const browser = await chromium.launch({
   executablePath: '/opt/google/chrome/chrome',
@@ -23,12 +24,12 @@ const page = await browser.newPage()
 page.setDefaultTimeout(600000)
 await page.goto(`http://127.0.0.1:${port}/momo-jazz-pro/`, { waitUntil: 'domcontentloaded' })
 const result = await page.evaluate(
-  async ({ choruses, fillsMode, tradeOn, isolate, tap }) => {
+  async ({ choruses, fillsMode, tradeOn, isolate, tap, chorusOrigin }) => {
     const mod = await import('/momo-jazz-pro/src/audio/measureJob.ts')
-    const repeats = Math.max(choruses, 6)
+    const repeats = 6
     const parts = []
-    for (let start = 0; start < choruses; start += 2) {
-      const n = Math.min(2, choruses - start)
+    for (let start = chorusOrigin; start < chorusOrigin + choruses; start += 2) {
+      const n = Math.min(2, chorusOrigin + choruses - start)
       parts.push(
         await mod.measureSession({
           tuneId: 'so-what',
@@ -53,6 +54,12 @@ const result = await page.evaluate(
       }
       merged.hits.headSnareByChorus = merged.hits.headSnareByChorus.concat(part.hits.headSnareByChorus)
       merged.hits.soloSnareByChorus = merged.hits.soloSnareByChorus.concat(part.hits.soloSnareByChorus)
+      if (part.fillV031) {
+        merged.fillV031 = merged.fillV031 || {}
+        for (const key of Object.keys(part.fillV031)) {
+          merged.fillV031[key] = (merged.fillV031[key] || []).concat(part.fillV031[key] || [])
+        }
+      }
     }
     const mean = (xs) => (xs.length ? xs.reduce((s, n) => s + n, 0) / xs.length : 0)
     merged.hits.headSnarePerBar = mean(merged.hits.headSnareByChorus)
@@ -61,7 +68,7 @@ const result = await page.evaluate(
     merged.peak = Math.max(...parts.map((part) => part.peak))
     return merged
   },
-  { choruses, fillsMode, tradeOn, isolate, tap },
+  { choruses, fillsMode, tradeOn, isolate, tap, chorusOrigin },
 )
 writeFileSync(outPath, JSON.stringify(result))
 console.log(compact(result))
@@ -75,6 +82,23 @@ function compact(data) {
     lines.push(`${key}: ${values.map(r).join(', ')}`)
   }
   lines.push(`hits snare H/S ${data.hits.headSnarePerBar.toFixed(2)}/${data.hits.soloSnarePerBar.toFixed(2)} rideQ ${data.hits.rideQuarterMinusSkipDb}`)
+  if (data.fillV031) {
+    const show = (name) => {
+      const rows = data.fillV031[name]
+      if (!rows) return
+      const solos = rows.filter((_, i) => i > 0 && !(data.choruses >= 6 && i === data.choruses - 1))
+      const use = solos.length ? solos : rows.slice(1)
+      if (!use.length) return
+      const avg = (bar) => use.reduce((s, row) => s + row[bar], 0) / use.length
+      const pick = [4, 8, 12, 16, 24, 32].map((n) => `${n}:${r(avg(n - 1))}`).join(' ')
+      lines.push(`v031 ${name} soloAvg ${pick}`)
+      lines.push(`v031 ${name} c1 ${[4, 8, 12, 16, 24, 32].map((n) => `${n}:${r(rows[Math.min(1, rows.length - 1)][n - 1])}`).join(' ')}`)
+    }
+    show('drums')
+    show(data.perChorus.drums ? 'drums' : 'mix')
+    show('kickLow')
+    show('snareBand')
+  }
   return lines.join('\n')
 }
 

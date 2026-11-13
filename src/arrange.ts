@@ -487,8 +487,18 @@ function applyShape(
     // setup hit identical, so the fill table could not be retuned.
     hit.velocity = Math.min(1, Math.max(0.02, hit.velocity))
     hit.gain = Math.max(0.02, gain)
+    // The snare sample peaks at full scale. Keep velocity × gain low enough that the
+    // snare bus (after its fader, before the master) stays under 1.0.
+    if (hit.part === 'drums' && hit.drum && SNARE_BUS.has(hit.drum)) {
+      const product = hit.velocity * hit.gain
+      if (product > SNARE_BUS_MAX_PRODUCT) hit.gain = SNARE_BUS_MAX_PRODUCT / hit.velocity
+    }
   }
 }
+
+const SNARE_BUS = new Set(['snare', 'sidestick', 'tomL', 'tomM', 'tomH'])
+/** Loudest measured kit.snare peak at this product is 0.985, before the master. */
+const SNARE_BUS_MAX_PRODUCT = 0.82
 
 function layoutChords(bar: ChartBar, transpose: number): LaidChord[] {
   let t = 0
@@ -626,7 +636,7 @@ function addSwingDrums(
     const chosen = bank[(o.barIndex + o.chorus * 2) % bank.length]
     // Section-mode bar 8 stays on the light short pattern. Every-4 bars 4 and 12
     // use the same pattern and need a few extra dB or they disappear into the groove.
-    const shortBoost = o.fillsMode === 'every4' && o.fill === 'short' ? dbToGain(8.0) : 1
+    const shortBoost = o.fillsMode === 'every4' && o.fill === 'short' ? dbToGain(2.4) : 1
     for (const ev of chosen) {
       push(ev.eighth, ev.drum, ev.vel * shortBoost, ev.drum === 'kick' ? 0.22 : 0.3)
     }
@@ -863,36 +873,39 @@ const SHORT: DrumEv[][] = [
   [{ eighth: 6, drum: 'tomL', vel: 0.42, setup: true }, { eighth: 7, drum: 'tomM', vel: 0.50, setup: true }],
   [{ eighth: 6, drum: 'sidestick', vel: 0.40, setup: true }, { eighth: 7, drum: 'snare', vel: 0.46, setup: true }],
 ]
+const MEDIUM_TRIM = dbToGain(-5)
 const MEDIUM: DrumEv[][] = [
   [
-    { eighth: 4, drum: 'snare', vel: 0.56, setup: true },
-    { eighth: 5, drum: 'snare', vel: 0.68, setup: true },
-    { eighth: 6, drum: 'kick', vel: 0.48, setup: true },
-    { eighth: 7, drum: 'snare', vel: 0.88, setup: true },
+    { eighth: 4, drum: 'snare', vel: 0.56 * MEDIUM_TRIM, setup: true },
+    { eighth: 5, drum: 'snare', vel: 0.68 * MEDIUM_TRIM, setup: true },
+    { eighth: 6, drum: 'kick', vel: 0.48 * MEDIUM_TRIM, setup: true },
+    { eighth: 7, drum: 'snare', vel: 0.88 * MEDIUM_TRIM, setup: true },
   ],
   [
-    { eighth: 4, drum: 'tomL', vel: 0.54, setup: true },
-    { eighth: 5, drum: 'tomM', vel: 0.62, setup: true },
-    { eighth: 6, drum: 'tomH', vel: 0.70, setup: true },
-    { eighth: 7, drum: 'snare', vel: 0.90, setup: true },
+    { eighth: 4, drum: 'tomL', vel: 0.54 * MEDIUM_TRIM, setup: true },
+    { eighth: 5, drum: 'tomM', vel: 0.62 * MEDIUM_TRIM, setup: true },
+    { eighth: 6, drum: 'tomH', vel: 0.70 * MEDIUM_TRIM, setup: true },
+    { eighth: 7, drum: 'snare', vel: 0.90 * MEDIUM_TRIM, setup: true },
   ],
   [
-    { eighth: 4, drum: 'kick', vel: 0.46, setup: true },
-    { eighth: 5, drum: 'snare', vel: 0.64, setup: true },
-    { eighth: 6, drum: 'kick', vel: 0.50, setup: true },
-    { eighth: 7, drum: 'snare', vel: 0.88, setup: true },
+    { eighth: 4, drum: 'kick', vel: 0.46 * MEDIUM_TRIM, setup: true },
+    { eighth: 5, drum: 'snare', vel: 0.64 * MEDIUM_TRIM, setup: true },
+    { eighth: 6, drum: 'kick', vel: 0.50 * MEDIUM_TRIM, setup: true },
+    { eighth: 7, drum: 'snare', vel: 0.88 * MEDIUM_TRIM, setup: true },
   ],
 ]
 const BIG: DrumEv[][] = [
   [
     { eighth: 4, drum: 'snare', vel: 0.88, setup: true },
     { eighth: 5, drum: 'kick', vel: 0.44, setup: true },
+    { eighth: 5, drum: 'snare', vel: 0.82, setup: true },
     { eighth: 6, drum: 'snare', vel: 0.94, setup: true },
     { eighth: 7, drum: 'kick', vel: 0.46, setup: true },
     { eighth: 7, drum: 'snare', vel: 0.98, setup: true },
   ],
   [
     { eighth: 4, drum: 'kick', vel: 0.42, setup: true },
+    { eighth: 4, drum: 'snare', vel: 0.82, setup: true },
     { eighth: 5, drum: 'snare', vel: 0.90, setup: true },
     { eighth: 6, drum: 'kick', vel: 0.46, setup: true },
     { eighth: 6, drum: 'snare', vel: 0.94, setup: true },

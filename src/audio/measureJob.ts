@@ -178,16 +178,21 @@ export async function measureSession(req: MeasureRequest) {
         rideBand: bandLimit(mono, SR, 5000, 12000),
         snareBand: bandLimit(mono, SR, 150, 400),
         kickBand: bandLimit(mono, SR, 40, 140),
+        kickLow: lowpass(mono, SR, 120),
       }
     : null
   if (bandData) {
     perChorus.rideBand = []
     perChorus.snareBand = []
     perChorus.kickBand = []
+    perChorus.kickLow = []
     perBar.rideBand = []
     perBar.snareBand = []
     perBar.kickBand = []
+    perBar.kickLow = []
   }
+  const beatSamples = Math.round((60 / bpm) * SR)
+  const fillV031: Record<string, number[][]> = {}
 
   let peak = 0
   for (let i = 0; i < left.length; i++) peak = Math.max(peak, Math.abs(left[i]), Math.abs(right[i]))
@@ -199,7 +204,7 @@ export async function measureSession(req: MeasureRequest) {
     perChorus[label].push(chorusDb)
     perBar[label].push([])
     if (bandData) {
-      for (const name of ['rideBand', 'snareBand', 'kickBand'] as const) {
+      for (const name of ['rideBand', 'snareBand', 'kickBand', 'kickLow'] as const) {
         perChorus[name].push(dbfs(rms(bandData[name].subarray(a, b))))
         perBar[name].push([])
       }
@@ -210,10 +215,38 @@ export async function measureSession(req: MeasureRequest) {
       const barDb = dbfs(stereoRms(left.subarray(ba, bb), right.subarray(ba, bb)))
       perBar[label][c].push(barDb)
       if (bandData) {
-        for (const name of ['rideBand', 'snareBand', 'kickBand'] as const) {
+        for (const name of ['rideBand', 'snareBand', 'kickBand', 'kickLow'] as const) {
           perBar[name][c].push(dbfs(rms(bandData[name].subarray(ba, bb))))
         }
       }
+    }
+  }
+
+  const last2Sources: { name: string; dataL: Float32Array; dataR: Float32Array | null }[] = [
+    { name: label, dataL: left, dataR: right },
+  ]
+  if (bandData) {
+    last2Sources.push(
+      { name: 'kickLow', dataL: bandData.kickLow, dataR: null },
+      { name: 'snareBand', dataL: bandData.snareBand, dataR: null },
+      { name: 'drums', dataL: left, dataR: right },
+    )
+  }
+  for (const source of last2Sources) {
+    fillV031[source.name] = []
+    for (let c = 0; c < choruses; c++) {
+      const levels: number[] = []
+      for (let bar = 0; bar < form; bar++) {
+        const origin = Math.floor((0.08 + (c * form + bar) * barDur) * SR)
+        const a2 = origin + beatSamples * 2
+        const b2 = origin + beatSamples * 4
+        const level = source.dataR
+          ? dbfs(stereoRms(source.dataL.subarray(a2, b2), source.dataR.subarray(a2, b2)))
+          : dbfs(rms(source.dataL.subarray(a2, b2)))
+        levels.push(level)
+      }
+      const mid = median(levels)
+      fillV031[source.name].push(levels.map((level) => level - mid))
     }
   }
 
@@ -228,6 +261,7 @@ export async function measureSession(req: MeasureRequest) {
     hits,
     perChorus,
     perBar,
+    fillV031,
     audio: null,
   }
 }
@@ -359,6 +393,22 @@ function rms(data: Float32Array): number {
   const n = data.length
   for (let i = 0; i < n; i++) s += data[i] * data[i]
   return Math.sqrt(s / Math.max(1, n))
+}
+
+function median(xs: number[]): number {
+  const sorted = xs.slice().sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  if (!sorted.length) return 0
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+function lowpass(input: Float32Array, sr: number, hi: number): Float32Array {
+  const out = new Float32Array(input)
+  const lp1 = biquad('lowpass', sr, hi)
+  const lp2 = biquad('lowpass', sr, hi)
+  filterInPlace(out, lp1)
+  filterInPlace(out, lp2)
+  return out
 }
 
 function dbfs(level: number): number {
