@@ -358,7 +358,7 @@ export function musicalShape(input: ShapeInput): MusicalShape {
     drumBusGain: clamp(dbToGain(drumBusDb), 0.25, 1.8),
     rideGain: clamp(dbToGain(drumBusDb + rideDb + cfg.voicing.rideExtraAttenuationDb), 0.12, 1.5),
     snareCompGain: clamp(dbToGain(drumBusDb + snareCompDb * 0.55), 0.1, 2.2),
-    hatGain: clamp(dbToGain(drumBusDb + hatDb), 0.25, 1.5),
+    hatGain: clamp(dbToGain(drumBusDb + hatDb), 0.04, 1.5),
     kickSetupGain: clamp(dbToGain(setupDrumDb + setupKickDb * 0.65), 0.5, 3.2),
     snareSetupGain: clamp(dbToGain(setupDrumDb + setupSnareDb * 0.65), 0.5, 8),
     bassGain: clamp(dbToGain(bassDb), 0.82, 1.18),

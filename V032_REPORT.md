@@ -1,6 +1,6 @@
 # Momo Jazz Pro v0.3.2 — measured report
 
-Version `0.3.2-beta.3`, branch off `v0.3` at `f44baa2`. This report replaces the claims in `V031_REPORT.md` and the beta.1 fill table. Feel numbers below were measured on beta.3. The fill table is the beta.2 measurement; a beta.3 recheck of the same v0.3.1 metric landed within 0.1 dB (bar 8 still +1.5, bar 16 +3.3, bars 24/32 +6.4/+6.2, kick 0–120 Hz +9.4/+7.7). Where a target is missed, it is marked missed.
+Version `0.3.2-beta.4`, branch off `v0.3` at `f44baa2`. This report replaces the claims in `V031_REPORT.md` and the beta.1 fill table. Feel numbers below were measured on beta.3 and still hold: the swing curve, the bass walk, and the fill scheduling were not retuned. The fill table is the beta.2 measurement; a beta.3 recheck of the same v0.3.1 metric landed within 0.1 dB (bar 8 still +1.5, bar 16 +3.3, bars 24/32 +6.4/+6.2, kick 0–120 Hz +9.4/+7.7). Where a target is missed, it is marked missed.
 
 ## How it was measured
 
@@ -118,6 +118,29 @@ Before numbers are the beta.2 diagnosis of `5c07fbc` (So What, 136 BPM, first so
 
 The bass line is deterministic: the same tune, chorus, and bar always produce the same notes. Walking quarters are not swung. The few swung pickups (5 in this chorus) sit on the bass pocket, so their grid-relative ratio is shallower (about 1.9). Ride, snare, and piano share the bar’s swing; their heard ratios sit together around 2.3.
 
+## Piano, cross-stick, and hi-hat (0.3.2-beta.4)
+
+Hit numbers are from `arrangeBar` at 136 BPM, humanize off, So What. The hi-hat and cross-stick levels are the targets from the round-2 and side-stick reports; the code uses those settings. The snare-bus peak was measured on this build (kit snare tap, loudest solo chorus plus the out-head).
+
+| | Target | beta.4 |
+|---|---|---|
+| Comping cells | more than 13 | **18** |
+| Both-hands events | more than 16% | **29%** |
+| Attacks / bar | about 2.4 | **2.5** |
+| Off-beat share | ≥ 55% | **73%** |
+| Velocity p10 / 50 / 90 (MIDI) | 38 / 73 / 87 | **40 / 72 / 85** |
+| Left hand / right hand | 45–56 / 57–75 | **45–56 / 57–75** |
+| Answer, chord 1 behind the beat-3 ride | about 12 ms (5–20) | **11 ms** median on bars that still have the ride quarter (6–17 ms). Fill bars replace that ride, so they are not in the median |
+| Answer, chord 2 behind the ride skip | about 8 ms | **9 ms** on the first answer |
+| Answer swing | about 2.2, same grid as the ride | the 4& is the ride's swung 4& plus that 9 ms. The ride's heard ratio stays **2.29** (programmed 2.20) |
+| Answer holds | long then short, not one fixed length | chord 1 holds until just before chord 2. Chord 2 holds **125–260 ms**, and the last answer holds **0.55–0.75 s**. 18 distinct 10 ms buckets across the two chords |
+| Head cross-stick | beat 4 only, velocity 0.30, 4–9 ms extra lay-back, none in the solo | as specified. Answer bars another −2.5 dB. Off-beat cell sticks and the answer catches are gone. Tests cover the count and the lay-back |
+| Head hat vs ride | about −11.5 dB RMS | settings are head **−14.5 dB**, solo **−3.5 dB**, pedal velocity 0.44 / 0.46. Head no longer stacks a closed hat on beats 2 and 4. Sample is the dark R2A pair only |
+| Snare bus peak | < 1.0 (was 1.019) | **0.842** |
+| Walking leaps | at most a major 6th | capped at 9 semitones, including across the barline |
+
+The piano bank is still the single-layer FluidR3 set. Velocity layers are expressed as MIDI velocity and a per-note gain, not as separate samples. The key-up is a two-part exponential (felt plus a short board tail), slower on long notes. Offline renders still start at 0.08 s, and the convolver stays normalized.
+
 ## So What theme, as implemented
 
 Odd bars are the call (beat 1 is a rest). Even bars are the held answer note plus the piano chords. The bridge (bars 17–24, Ebm7) is the same pattern one semitone up. MIDI is written for D Dorian at transpose 0; D2 = 38.
@@ -150,4 +173,4 @@ The theme plays only on HEAD choruses. With 2 choruses the second chorus is the 
 
 ## Build
 
-`npm test`: 5 files, 55 passed. `npm run build` is clean. First-screen JS `index-*.js` is **33.1 KB gzip** (limit 40). The arranger loads when playback starts, not on the first screen. The render module stays split.
+`npm test`: 7 files, 65 passed. `npm run build` (`tsc -b` and the bundle) is clean. First-screen JS `index-*.js` is **33.4 KB gzip** (limit 40). The arranger loads when playback starts, not on the first screen. The render module stays split.

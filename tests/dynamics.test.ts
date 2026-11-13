@@ -515,8 +515,10 @@ describe('v0.3.2 snare bus ceiling', () => {
     expect(maxProduct).toBeLessThanOrEqual(0.82)
   })
 
-  it('schedules three solo piano attacks on every So What solo bar', () => {
+  it('comps So What solos at about two or three attacks a bar, not a locked three', () => {
     const tune = findTune('so-what')!
+    let groups = 0
+    let bars = 0
     for (const chorus of [1, 2, 3, 4]) {
       for (let bar = 0; bar < 32; bar++) {
         const hits = arrangeBar({
@@ -533,17 +535,21 @@ describe('v0.3.2 snare bus ceiling', () => {
           repeats: 6,
         })
         const times = hits.filter((hit) => hit.part === 'piano').map((hit) => hit.time).sort((a, b) => a - b)
-        let groups = 0
+        let count = 0
         let last = -9
         for (const time of times) {
           if (time - last > 0.04) {
-            groups += 1
+            count += 1
             last = time
           }
         }
-        expect(groups).toBe(3)
+        groups += count
+        bars += 1
       }
     }
+    const perBar = groups / bars
+    expect(perBar).toBeGreaterThan(1.5)
+    expect(perBar).toBeLessThan(3.2)
   })
 })
 

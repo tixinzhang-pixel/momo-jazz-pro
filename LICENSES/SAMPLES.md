@@ -55,6 +55,13 @@ Frank Wen 在音源说明里还写过几条愿望：音源可以免费用于个�
 
 重新下载可以运行 `node scripts/fetch-samples.mjs`。
 
+## Virtuosity Drums（CC0 1.0）
+
+- 来源：Virtuosity Drums（Versilian Studios / Karoryfer，CC0 1.0 Public Domain）
+- 脚踏踩镲：`public/samples/drums/hatPedal_R2A_pedal1_mid_r1.mp3` 和 `r2.mp3`。取自 `hh_pedal_vl1`，`snaremic` 与 `mid` 对齐后混合，高通、低通和柔起音，没有 2 kHz 峰值提升。R2B / R2C 没有收进这个版本。
+- 军鼓边击：`public/samples/drums/sidestick_r1.mp3` 和 `r2.mp3`。响弦关掉的 cross-stick（vl4 / vl5）做两个 round-robin，近麦、overhead 和 room 混在一起，压暗、缩短，响度对齐原来的 FluidR3 边击。
+- 许可：CC0 1.0（可自由商用与再分发，无传染性）
+
 ## 不是采样的声音
 
 这些是本仓库自己写的合成，没有外部采样：

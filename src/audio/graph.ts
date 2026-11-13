@@ -49,6 +49,7 @@ export function createGraph(ctx: BaseAudioContext, opts?: { output?: AudioNode |
   if (output) trim.connect(output)
 
   const convolver = ctx.createConvolver()
+  convolver.normalize = true
   convolver.buffer = roomImpulse(ctx)
   const wet = ctx.createGain()
   wet.gain.value = 0.26

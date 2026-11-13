@@ -148,6 +148,8 @@ export interface Hit {
   /** Seconds. 0 means let a one-shot ring for its natural length. */
   duration: number
   pan: number
+  /** Piano key-up. Soft is the slower damper used on long answers and held comping. */
+  release?: 'soft' | 'normal'
 }
 
 export interface TradeSettings {

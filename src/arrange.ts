@@ -24,6 +24,7 @@ import {
   swungBeatOffset,
 } from './feel.ts'
 import type { Pocket } from './feel.ts'
+import { soloCompHits, soWhatAnswerHits } from './piano.ts'
 import { turnAt } from './trading.ts'
 import { chordScale, chordTones, guideIntervals, mod, parseChord, transposeModel } from './theory.ts'
 import type {
@@ -280,6 +281,7 @@ export function arrangeBar(input: ArrangeInput): Hit[] {
       playingMode: shape.playingMode,
     })
   } else {
+    soWhatAnswerBarFlag.on = isSoWhatHead(tune, shape.playingMode)
     addSwingDrums(hits, {
       beatSec,
       ratio,
@@ -358,6 +360,7 @@ export function arrangeBar(input: ArrangeInput): Hit[] {
         playingMode: shape.playingMode,
         isBridge: tune.bars[barIndex]?.activeSection === 'B' || (form === 32 && barIndex >= 16 && barIndex < 24),
         sparse: userDrums,
+        userTurn: userMelodic,
       })
     }
 
@@ -562,11 +565,15 @@ function addSwingDrums(
 
   const push = (eighth: number, drum: DrumId, vel: number, duration = 0) => {
     const pocket = pocketFor(drum, vel)
+    const velHumanizeDb =
+      drum === 'hatPedal' && cfg.voicing.hatPedal.mode !== 'legacy'
+        ? cfg.voicing.hatPedal.humanizeVelDb
+        : cfg.voicing.ridePattern.humanizeVelDb
     hits.push({
       time: place(eighthOffset(eighth, o.beatSec, o.ratio), pocket, o.rng, o.humanize),
       part: 'drums',
       drum,
-      velocity: humanizeDbVel(vel, cfg.voicing.ridePattern.humanizeVelDb, o.rng, o.humanize),
+      velocity: humanizeDbVel(vel, velHumanizeDb, o.rng, o.humanize),
       duration,
       pan: PAN[drum],
     })
@@ -614,6 +621,8 @@ function addSwingDrums(
         vel = Math.min(1, vel * dbToGain(cfg.sections.crash.sectionAccentDbOverRide))
       }
       push(ride.eighth, ride.drum, vel, ride.drum === 'hatClosed' ? 0.09 : 0)
+      // Do not layer stick hatClosed on top of the 2 & 4 hatPedal chick in HEAD; keep rng stream identical.
+      if (ride.drum === 'hatClosed' && cfg.voicing.hatPedal.mode !== 'legacy') hits.pop()
     }
   }
 
@@ -631,10 +640,22 @@ function addSwingDrums(
     }
     // A4: Snare comping density (2-2.5 in HEAD, 2-3 in SOLO <=160 BPM, 3-3.5 in SOLO >160 BPM)
     const cell = snareCell(o.barIndex, o.chorus, o.bpm, o.playingMode)
+    const xs = cfg.voicing.crossStick
+    const headX = o.playingMode === 'HEAD' && xs.mode !== 'legacy'
+    // The HEAD cross-sticks count toward headHitsPerBar, so the cells keep at most (cap - cross-sticks).
+    const cellCap = headX
+      ? Math.max(0, Math.ceil(cfg.voicing.snareComping.headHitsPerBar - 1e-6) - (xs.mode === 'beats24' ? 2 : 1))
+      : Infinity
+    let kept = 0
     for (const ev of cell) {
       if (fillEighths.has(ev.eighth)) continue
       push(ev.eighth, ev.drum, ev.vel, ev.drum === 'sidestick' ? 0.16 : ev.vel < 0.35 ? 0.18 : 0.36)
+      // beta.4: off-beat cross-stick accents in HEAD cells are dropped (the push above still runs so
+      // the per-bar rng stream, and with it bass/piano/ride humanize, stays identical to beta.3).
+      if (headX && (ev.drum === 'sidestick' || kept >= cellCap)) hits.pop()
+      else kept += 1
     }
+    if (headX) addHeadCrossStick(hits, o, fillEighths)
   } else if (o.turn) {
     const local = o.turn.barInTurn % 4
     const pattern = (Math.floor(o.turn.barInTurn / 4) + o.chorus) % SOLO.length
@@ -670,6 +691,36 @@ function addSwingDrums(
   }
 }
 
+/** beta.4 HEAD cross-stick: soft, on 4 (or 2 and 4), slightly behind. Own rng so nothing else moves. */
+function addHeadCrossStick(
+  hits: Hit[],
+  o: { beatSec: number; ratio: number; barIndex: number; chorus: number; humanize: boolean; userDrums: boolean; drumSolo: boolean; style: StyleId },
+  fillEighths: Set<number>,
+): void {
+  if (o.userDrums || o.drumSolo) return
+  const xs = DYNAMICS_CONFIG.voicing.crossStick
+  const rng = mulberry32(hashString(`xstick|${o.chorus}|${o.barIndex}`))
+  const eighths = xs.mode === 'beats24' ? [2, 6] : [6]
+  for (const eighth of eighths) {
+    if (fillEighths.has(eighth)) continue
+    let db = eighth === 2 ? xs.beat2Db : 0
+    if (eighth === 6 && o.barIndex % 2 === 1 && soWhatAnswerBarFlag.on) db += xs.answerBarDb
+    if (o.humanize) db += (rng() * 2 - 1) * xs.humanizeDb
+    const lay = (xs.laybackMs[0] + (xs.laybackMs[1] - xs.laybackMs[0]) * rng()) / 1000
+    hits.push({
+      time: place(eighthOffset(eighth, o.beatSec, o.ratio) + lay, 'snare', rng, o.humanize),
+      part: 'drums',
+      drum: 'sidestick',
+      velocity: Math.min(1, xs.baseVel * dbToGain(db)),
+      duration: xs.duration,
+      pan: PAN.sidestick,
+    })
+  }
+}
+
+/** Set by arrangeBar for So What HEAD bars so the answer-bar trim only applies there. */
+const soWhatAnswerBarFlag = { on: false }
+
 function addShuffleDrums(
   hits: Hit[],
   o: {
@@ -692,11 +743,15 @@ function addShuffleDrums(
   const cfg = DYNAMICS_CONFIG
   const push = (eighth: number, drum: DrumId, vel: number, duration = 0) => {
     const pocket = pocketFor(drum, vel)
+    const velHumanizeDb =
+      drum === 'hatPedal' && cfg.voicing.hatPedal.mode !== 'legacy'
+        ? cfg.voicing.hatPedal.humanizeVelDb
+        : 1.5
     hits.push({
       time: place(eighthOffset(eighth, o.beatSec, o.ratio), pocket, o.rng, o.humanize),
       part: 'drums',
       drum,
-      velocity: humanizeDbVel(vel, 1.5, o.rng, o.humanize),
+      velocity: humanizeDbVel(vel, velHumanizeDb, o.rng, o.humanize),
       duration,
       pan: PAN[drum],
     })
@@ -1161,7 +1216,8 @@ function ensureBass(tune: Tune, style: StyleId, transpose: number, chorus: numbe
       last = existing.notes
     } else {
       const rng = mulberry32(hashString(`${k}|walk`))
-      const entry = bassLine(tune, style, transpose, c, b, lastDown, shape, shapeRun, rng)
+      const prevMidi = last.length ? (last[last.length - 1]?.midi ?? null) : null
+      const entry = bassLine(tune, style, transpose, c, b, lastDown, prevMidi, shape, shapeRun, rng)
       walkCache.set(k, entry)
       shape = entry.shape
       shapeRun = entry.shapeRun
@@ -1185,6 +1241,7 @@ function bassLine(
   chorus: number,
   barIndex: number,
   lastDown: number | null,
+  prevMidi: number | null,
   shape: WalkShape,
   shapeRun: number,
   rng: () => number,
@@ -1197,7 +1254,7 @@ function bassLine(
   const nextPc = next[0].chord.bass
   if (style === 'bossa') return plainWalk(bossaBass(layout, nextPc, lastDown, barIndex))
   if (style === 'ballad') return plainWalk(balladBass(layout, nextPc, lastDown, rng))
-  const walked = swingWalk(tune, style, transpose, chorus, barIndex, nextChorus, nextBar, layout, next, lastDown, shape, shapeRun, rng)
+  const walked = swingWalk(tune, style, transpose, chorus, barIndex, nextChorus, nextBar, layout, next, lastDown, prevMidi, shape, shapeRun, rng)
   if (style === 'shuffle') return { ...walked, notes: shufflePickups(walked.notes, barIndex) }
   return walked
 }
@@ -1223,6 +1280,7 @@ function swingWalk(
   layout: LaidChord[],
   nextLayout: LaidChord[],
   lastDown: number | null,
+  prevMidi: number | null,
   prevShape: WalkShape,
   prevRun: number,
   rng: () => number,
@@ -1259,9 +1317,8 @@ function swingWalk(
   if (midis[2] === midis[1] || midis[2] === midis[3]) midis[2] = distinctPitch(midis[2] + dir, midis[1])
   for (let i = 1; i < midis.length; i++) {
     if (midis[i] === midis[i - 1]) midis[i] = distinctPitch(midis[i] + dir, midis[i - 1])
-    if (Math.abs(midis[i] - midis[i - 1]) > 12) {
-      const pulled = midis[i - 1] + Math.sign(midis[i] - midis[i - 1]) * 7
-      midis[i] = Math.max(BASS_LO, Math.min(BASS_HI, pulled))
+    if (Math.abs(midis[i] - midis[i - 1]) > 9) {
+      midis[i] = midis[i - 1] + Math.sign(midis[i] - midis[i - 1]) * 9
     }
   }
 
@@ -1272,7 +1329,25 @@ function swingWalk(
     arcDb: phraseArc(index, barIndex, index === 3),
   }))
   addSwungPickup(notes, target, rng)
+  capWalkLeaps(notes, prevMidi)
+  const beat1Note = notes[0]
+  if (beat1Note && prevMidi != null && Math.abs(beat1Note.midi - prevMidi) <= 9) {
+    const near = pitchesOf(chord, false).filter((n) => Math.abs(n - prevMidi) <= 9)
+    if (near.length && !near.includes(beat1Note.midi)) beat1Note.midi = nearestPitch(near, beat1Note.midi, [])
+    capWalkLeaps(notes.slice(1), beat1Note.midi)
+  }
   return { notes, shape, shapeRun, downbeat: notes[0]?.midi ?? beat1 }
+}
+
+/** No walking interval wider than a major 6th, including across the barline. */
+function capWalkLeaps(notes: BassNote[], prev: number | null): void {
+  let last = prev
+  for (const note of notes) {
+    if (last != null && Math.abs(note.midi - last) > 9) {
+      note.midi = Math.max(BASS_LO, Math.min(BASS_HI, last + Math.sign(note.midi - last) * 9))
+    }
+    last = note.midi
+  }
 }
 
 function addSwungPickup(notes: BassNote[], target: number, rng: () => number): void {
@@ -1514,8 +1589,29 @@ function addPianoComp(
     playingMode: PlayingMode
     isBridge: boolean
     sparse: boolean
+    userTurn: boolean
   },
 ): void {
+  if ((o.style === 'swing' || o.style === 'up') && o.playingMode === 'SOLO' && !o.sparse) {
+    const chord = o.layout[0]?.chord
+    if (chord) {
+      for (const hit of soloCompHits({
+        tuneId: o.tune.id,
+        style: o.style,
+        transpose: o.transpose,
+        chorus: o.chorus,
+        bar: o.barIndex,
+        beatSec: o.beatSec,
+        ratio: o.ratio,
+        bridge: o.isBridge,
+        soWhat: o.tune.id === 'so-what',
+        semitone: o.transpose,
+        chord,
+        userTurn: o.userTurn,
+      })) hits.push(hit)
+      return
+    }
+  }
   if (o.sparse && o.barIndex % 2 === 1) return
   const attacks = pianoAttacks(o)
   const soloTrim = o.playingMode === 'SOLO' ? dbToGain(DYNAMICS_CONFIG.piano.soloTrimDb) : 1
@@ -2064,33 +2160,29 @@ function addSoWhatHead(
     })
   }
 
-  // Piano response chords
-  for (const c of head.chords) {
-    const when = swungBeatOffset(c.beat, o.beatSec, o.ratio)
-    c.notes.forEach((midi, i) => {
-      hits.push({
-        time: place(when, 'piano', o.rng, o.humanize) + i * 0.0035,
-        part: 'piano',
-        midi,
-        velocity: humanVelocity(c.vel, o.rng, o.humanize),
-        duration: c.durationBeats * o.beatSec * 0.92,
-        pan: -0.22,
-      })
-    })
-  }
+  const semitone = o.transpose + (isEb ? 1 : 0)
+  for (const hit of soWhatAnswerHits({
+    barIndex: o.barIndex,
+    beatSec: o.beatSec,
+    ratio: o.ratio,
+    semitone,
+    rng: o.rng,
+  })) hits.push(hit)
 
   // Drum catches on the two response hits (Beat 3 and Beat 4&)
   if (!o.userDrums && !o.drumSolo && head.chords.length > 0) {
     for (const c of head.chords) {
       const when = swungBeatOffset(c.beat, o.beatSec, o.ratio)
-      hits.push({
+      const catchHit: Hit = {
         time: place(when, 'snare', o.rng, o.humanize),
         part: 'drums',
         drum: 'sidestick',
         velocity: humanVelocity(0.48, o.rng, o.humanize),
         duration: 0.12,
         pan: 0.16,
-      })
+      }
+      // beta.4: no cross-stick catch doubling the piano answer (rng still consumed above).
+      if (DYNAMICS_CONFIG.voicing.crossStick.mode === 'legacy') hits.push(catchHit)
     }
   }
 }

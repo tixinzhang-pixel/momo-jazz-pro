@@ -46,6 +46,8 @@ export function playHit(
     filterHz: hit.part === 'bass' ? 700 + level * 2200 : hit.part === 'guitar' ? 1400 + level * 2800 : 1800 + level * 6400,
     trackGain: false,
     legato: hit.part === 'bass',
+    pianoRelease: hit.part === 'piano' ? (hit.release ?? 'normal') : undefined,
+    midi: hit.midi,
   })
   if (hit.part === 'bass') playFinger(ctx, graph.bass, book, when, level)
 }
@@ -105,7 +107,15 @@ function playSample(
   velocity: number,
   duration: number,
   pan: number,
-  opts: { rate?: number; detuneCents?: number; filterHz: number; trackGain: boolean; legato?: boolean },
+  opts: {
+    rate?: number
+    detuneCents?: number
+    filterHz: number
+    trackGain: boolean
+    legato?: boolean
+    pianoRelease?: 'soft' | 'normal'
+    midi?: number
+  },
 ): GainNode | null {
   const src = ctx.createBufferSource()
   src.buffer = buffer
@@ -116,11 +126,40 @@ function playSample(
   filter.frequency.value = opts.filterHz
   filter.Q.value = 0.6
   const gain = ctx.createGain()
+  const panner = ctx.createStereoPanner()
+  panner.pan.value = Math.max(-1, Math.min(1, pan))
   const drum = opts.detuneCents != null
   const amp = Math.pow(velocity, drum ? 1.15 : 1.35) * (drum ? 0.95 : 0.78)
   const natural = buffer.duration / Math.max(0.25, rate)
   const hold = duration > 0 ? Math.min(duration, natural) : natural
   gain.gain.setValueAtTime(Math.max(0.0008, amp), when)
+  if (opts.pianoRelease && duration > 0) {
+    const reg = Math.min(1, Math.max(0, ((opts.midi ?? 60) - 48) / 30))
+    const wobble = ((opts.midi ?? 60) % 7) / 7
+    let tau1 = (0.016 + 0.01 * wobble) * (1.15 - 0.3 * reg)
+    let tau2 = (0.05 + 0.025 * (((opts.midi ?? 60) * 3) % 7) / 7) * (1.2 - 0.4 * reg)
+    if (opts.pianoRelease === 'soft') {
+      tau1 *= 1.5
+      tau2 *= 1.35
+    }
+    const tail = Math.min(0.45, Math.max(0.12, tau2 * 8))
+    const curve = new Float32Array(64)
+    for (let i = 0; i < curve.length; i++) {
+      const t = (i / (curve.length - 1)) * tail
+      const g = 0.72 * Math.exp(-t / tau1) + 0.28 * Math.exp(-t / tau2)
+      curve[i] = Math.max(0.0008, amp * g)
+    }
+    const holdEnd = when + Math.max(0.02, hold)
+    gain.gain.setValueCurveAtTime(curve, holdEnd, tail)
+    src.connect(filter)
+    filter.connect(gain)
+    gain.connect(panner)
+    panner.connect(dest)
+    src.start(when)
+    src.stop(holdEnd + tail + 0.02)
+    book.active.push(src)
+    return opts.trackGain ? gain : null
+  }
   if (duration > 0 && duration < natural - 0.02) {
     // Bass stays up until 6 ms before the next onset, then a short overlap.
     // Other notes keep the older 30 ms release.
@@ -130,8 +169,6 @@ function playSample(
     if (opts.legato) gain.gain.setTargetAtTime(0.0008, fadeAt, 0.007)
     else gain.gain.exponentialRampToValueAtTime(0.0008, fadeAt + 0.035)
   }
-  const panner = ctx.createStereoPanner()
-  panner.pan.value = Math.max(-1, Math.min(1, pan))
   src.connect(filter)
   filter.connect(gain)
   gain.connect(panner)

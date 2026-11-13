@@ -150,8 +150,8 @@ describe('bass and piano', () => {
       for (const midi of notes) expect(midi).toBeLessThanOrEqual(48)
       const next = line[i + 1][0]
       intervals.push(Math.abs(quarters[3] - next))
-      for (let n = 1; n < notes.length; n++) expect(Math.abs(notes[n] - notes[n - 1])).toBeLessThanOrEqual(12)
-      expect(Math.abs(next - quarters[3])).toBeLessThanOrEqual(12)
+      for (let n = 1; n < notes.length; n++) expect(Math.abs(notes[n] - notes[n - 1])).toBeLessThanOrEqual(9)
+      expect(Math.abs(next - quarters[3])).toBeLessThanOrEqual(9)
     }
     const close = intervals.filter((iv) => [1, 2, 5, 7].includes(iv) || iv === 0).length
     expect(close / intervals.length).toBeGreaterThan(0.7)

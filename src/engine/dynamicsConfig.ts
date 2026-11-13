@@ -32,7 +32,7 @@ export const DYNAMICS_CONFIG = {
       /** Ride band about 8 dB below its SOLO level (So What ref A/B measured 8-11 dB lower). */
       rideDbOffset: -8.0,
       /** Hi-hat foot / timekeeping prominence in HEAD (dB relative to normal hat). */
-      hatDbOffset: 1.5,
+      hatDbOffset: -14.5,
       /** Snare comping at its base level (0 dB reference), sparse: about 2-2.5 hits per bar (So What ref A/B). */
       snareCompDbOffset: 0.0,
       /** Head drum bus, +1.5 dB vs the v0.3.1 offset of -4.5 so SOLO−HEAD can land in +3..+6. */
@@ -50,7 +50,7 @@ export const DYNAMICS_CONFIG = {
     solo: {
       /** Solo ride sits above the head pattern so the ride band can land 2–3 dB under the snare. */
       rideDbOffset: 5.2,
-      hatDbOffset: 0.0,
+      hatDbOffset: -3.5,
       /** Snare comping steps up per soloist block (see A2): +5 dB in block 1 up to +15 dB at peak vs HEAD (So What ref A/B). */
       snareCompBlock1Db: 5.0,
       snareCompPeakDb: 15.0,
@@ -177,10 +177,13 @@ export const DYNAMICS_CONFIG = {
       fastBpmThreshold: 180,
       humanizeVelDb: 1.5,
     },
-    /** Hi-hat foot on 2 and 4: subtle level, not above ride quarter notes (So What ref A/B). */
+    /** Hi-hat foot on 2 and 4: soft, dark chick tucked clearly under ride quarter notes. */
     hatPedal: {
-      beat2Vel: 0.46,
-      beat4Vel: 0.52,
+      mode: 'chick' as 'chick' | 'legacy',
+      beat2Vel: 0.44,
+      beat4Vel: 0.46,
+      /** Velocity humanization (~+-10% linear). */
+      humanizeVelDb: 0.82,
     },
     /**
      * Snare comping density (So What ref A/B):
@@ -188,6 +191,25 @@ export const DYNAMICS_CONFIG = {
      * - Fast tempo (> 160 BPM): 3-3.5 hits/bar in SOLO.
      * - Ghost notes stay well below comping accents.
      */
+    /**
+     * v0.3.2-beta.4 cross-stick (Timo: the rim click "steals the show").
+     * HEAD: one soft cross-stick per bar on beat 4 (eighth 6), laid back a few ms; no cross-stick on
+     * off-beats and no cross-stick catches doubling the So What answers. SOLO: none (snare cells only).
+     * Fills / trading keep their tables. `mode: 'legacy'` restores beta.3 behaviour for A/B renders.
+     */
+    crossStick: {
+      mode: 'beat4' as 'beat4' | 'beats24' | 'legacy',
+      /** Musical velocity before the HEAD snare-comp bus gain. */
+      baseVel: 0.3,
+      /** Beat 2 relative to beat 4 when mode is 'beats24'. */
+      beat2Db: -1.5,
+      /** So What answer bars (odd bars): beat 4 sits under the answer on 4&. */
+      answerBarDb: -2.5,
+      /** Extra lay-back on top of the snare pocket (+4 ms), uniform in this range, ms. */
+      laybackMs: [4, 9] as [number, number],
+      humanizeDb: 1.0,
+      duration: 0.12,
+    },
     snareComping: {
       fastTempoThresholdBpm: 160,
       headHitsPerBar: 2.25,
