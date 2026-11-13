@@ -78,7 +78,8 @@ export function Player({
   const shown = displayKey(tune.key, transpose, chart)
   const shift = chartSemitoneShift(transpose, chart)
   const turn = turnAt(head.status === 'playing' ? head.playBar : 0, tradeLen, userStarts, role)
-  const formBar = head.status === 'playing' ? head.bar : 0
+  const inIntro = head.introBar != null
+  const formBar = head.status === 'playing' && !inIntro ? head.bar : 0
   const current = tune.bars[Math.min(formBar, tune.bars.length - 1)]
 
   useEffect(() => {
@@ -123,12 +124,12 @@ export function Player({
             <div class="paper">
               <div class="paper-meta">
                 <span>{STYLE_LABEL[style]}</span>
-                <span>{tune.bars.length} 小节</span>
+                <span>{inIntro ? `前奏 ${head.introBar! + 1}` : `${tune.bars.length} 小节`}</span>
                 <span>{shown.name}</span>
               </div>
               <div class="bars">
                 {tune.bars.map((bar, index) => {
-                  const active = head.status === 'playing' && head.bar === index
+                  const active = head.status === 'playing' && !inIntro && head.bar === index
                   const inLoop = loop != null && index >= loop.start && index <= loop.end
                   return (
                     <button

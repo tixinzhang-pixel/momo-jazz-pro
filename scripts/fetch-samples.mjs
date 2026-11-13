@@ -65,9 +65,9 @@ const manifest = {
   drums: {
     kick: ['drums/kick.mp3'],
     snare: ['drums/snare.mp3', 'drums/snareAlt.mp3'],
-    sidestick: ['drums/sidestick.mp3'],
+    sidestick: ['drums/sidestick_r1.mp3', 'drums/sidestick_r2.mp3'],
     hatClosed: ['drums/hatClosed.mp3'],
-    hatPedal: ['drums/hatPedal.mp3'],
+    hatPedal: ['drums/hatPedal_R2A_pedal1_mid_r1.mp3', 'drums/hatPedal_R2A_pedal1_mid_r2.mp3'],
     hatOpen: ['drums/hatOpen.mp3'],
     ride: ['drums/ride.mp3', 'drums/rideAlt.mp3'],
     rideBell: ['drums/rideBell.mp3'],

@@ -22,6 +22,26 @@ export function swingRatio(
 }
 
 /**
+ * One swing for the whole bar, with a slight deterministic breath (±0.06)
+ * so 136 BPM does not sit on a single locked ratio. A slider override is exact.
+ * Straight styles (bossa) do not breathe.
+ */
+export function barSwingFraction(
+  bpm: number,
+  style: StyleId,
+  barIndex: number,
+  chorus: number,
+  customRatioR: number | null = null,
+  subdivision: SubdivisionMode = '8ths',
+): number {
+  if (customRatioR != null || style === 'bossa') return swingRatio(bpm, style, customRatioR, subdivision)
+  const r = defaultSwingRatioR(bpm, style, subdivision)
+  const rng = mulberry32(hashString(`breath|${style}|${chorus}|${barIndex}`))
+  const breathed = Math.min(3.5, Math.max(1, r + (rng() - 0.5) * 0.12))
+  return ratioToBeatFraction(breathed)
+}
+
+/**
  * Resolve the effective long:short ratio r (1.0 to 3.5) for UI display and scheduling.
  */
 export function effectiveSwingRatioR(
@@ -85,17 +105,28 @@ export function sixteenthOffset(
 
 export type Pocket = 'ride' | 'hat' | 'kick' | 'snare' | 'ghost' | 'bass' | 'piano' | 'guitar' | 'click' | 'brush'
 
+/**
+ * One pocket, shared swing grid.
+ * Ride sits 4 ms behind the beat. Bass is scheduled 14 ms early so that,
+ * after FluidR3's ~8 ms speech, the note is heard about 10 ms before the ride.
+ * Snare matches the ride's "&" (+4 ms). Piano is about +6 ms.
+ * Jitter amplitude 12 ms through the 3-uniform shaper is a standard deviation of about 4 ms.
+ */
 const POCKET: Record<Pocket, { bias: number; jitter: number }> = {
-  ride: { bias: -0.006, jitter: 0.003 },
-  hat: { bias: 0, jitter: 0.002 },
-  kick: { bias: 0.004, jitter: 0.0035 },
-  snare: { bias: 0.01, jitter: 0.005 },
-  ghost: { bias: 0.012, jitter: 0.006 },
-  bass: { bias: -0.004, jitter: 0.004 },
-  piano: { bias: 0.014, jitter: 0.005 },
-  guitar: { bias: 0.008, jitter: 0.004 },
+  ride: { bias: 0.004, jitter: 0.012 },
+  hat: { bias: 0.002, jitter: 0.009 },
+  kick: { bias: 0.004, jitter: 0.01 },
+  snare: { bias: 0.004, jitter: 0.012 },
+  ghost: { bias: 0.008, jitter: 0.014 },
+  bass: { bias: -0.014, jitter: 0.012 },
+  piano: { bias: 0.006, jitter: 0.012 },
+  guitar: { bias: 0.008, jitter: 0.012 },
   click: { bias: 0, jitter: 0 },
-  brush: { bias: 0.002, jitter: 0.004 },
+  brush: { bias: 0.002, jitter: 0.01 },
+}
+
+export function pocketBias(pocket: Pocket): number {
+  return POCKET[pocket].bias
 }
 
 export function place(time: number, pocket: Pocket, rng: () => number, humanize: boolean): number {

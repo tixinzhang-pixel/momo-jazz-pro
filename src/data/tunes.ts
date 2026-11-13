@@ -73,7 +73,7 @@ function tune(src: TuneSource): Tune {
 }
 
 /**
- * Chord changes only. No melodies, no lyrics.
+ * Chord changes, plus the So What head melody (see LICENSES/SAMPLES.md). No lyrics.
  * Symbols: maj7 / ^7 / Δ7, -7 / m7, ø / m7b5, dim7, 7alt, 7sus, slash bass, % repeats a bar.
  * Uneven bars: F7@3 D7alt@1
  * Dean can edit the chart strings. review status is intentionally still "draft".
@@ -385,8 +385,10 @@ const SOURCES: TuneSource[] = [
       Em7 | A7 | Em7 | A7 |
       Am7 | D7 | Abm7 | Db7 |
       Cmaj7 | % | Gm7 | C7 |
-      [B] Gm7 C7 | Gm7 C7 | Fmaj7 | Fmaj7 |
-      Am7 D7 | Am7 D7 | G7 | G7 |
+      [B] Gm7 | C7 | Gm7 | C7 |
+      Fmaj7 | % | % | % |
+      Am7 | D7 | Am7 | D7 |
+      G7 | % | % | % |
       [A] Dm7 | G7 | Dm7 | G7 |
       Em7 | A7 | Em7 | A7 |
       Am7 | D7 | Abm7 | Db7 |

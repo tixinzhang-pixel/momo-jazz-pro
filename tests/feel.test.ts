@@ -27,16 +27,21 @@ describe('v0.3 Scope B swing timing math', () => {
   })
 
   it('interpolates provisional per-style default curves by tempo', () => {
-    // Medium swing: <=140 -> 2.6, 180 -> 1.5, 220 -> 1.2, >=260 -> 1.1
-    expect(defaultSwingRatioR(100, 'swing')).toBe(2.6)
-    expect(defaultSwingRatioR(140, 'swing')).toBe(2.6)
+    // 136 BPM is 2.20 so the heard ride, 4 ms late, sits near Kind of Blue's 2.30.
+    expect(defaultSwingRatioR(136, 'swing')).toBeCloseTo(2.2, 5)
+    expect(defaultSwingRatioR(100, 'swing')).toBeGreaterThan(2.2)
+    expect(defaultSwingRatioR(100, 'swing')).toBeLessThan(2.5)
+    expect(defaultSwingRatioR(140, 'swing')).toBeGreaterThan(2.1)
+    expect(defaultSwingRatioR(140, 'swing')).toBeLessThan(2.25)
     expect(defaultSwingRatioR(180, 'swing')).toBe(1.5)
     expect(defaultSwingRatioR(220, 'swing')).toBe(1.2)
     expect(defaultSwingRatioR(280, 'swing')).toBe(1.1)
 
-    // Linear interpolation between 140 (2.6) and 180 (1.5)
-    const midSwing = defaultSwingRatioR(160, 'swing')
-    expect(midSwing).toBeCloseTo((2.6 + 1.5) / 2, 3)
+    const midSwing = defaultSwingRatioR(158, 'swing')
+    const at136 = 2.2
+    const at180 = 1.5
+    const t = (158 - 136) / (180 - 136)
+    expect(midSwing).toBeCloseTo(at136 + (at180 - at136) * t, 3)
 
     // Ballad: <=90 -> 2.2, 120 -> 2.0
     expect(defaultSwingRatioR(80, 'ballad')).toBe(2.2)
@@ -52,13 +57,12 @@ describe('v0.3 Scope B swing timing math', () => {
   })
 
   it('respects user custom ratio override and reset to style default', () => {
-    // Default auto for swing at 140 BPM is 2.6
-    expect(effectiveSwingRatioR(140, 'swing', null)).toBe(2.6)
+    expect(effectiveSwingRatioR(136, 'swing', null)).toBeCloseTo(2.2, 5)
     // User moves slider to 2.15: turns off auto and keeps custom ratio
     expect(effectiveSwingRatioR(140, 'swing', 2.15)).toBe(2.15)
     expect(swingRatio(140, 'swing', 2.15)).toBeCloseTo(2.15 / 3.15, 4)
     // User resets to default (null): returns to auto
-    expect(effectiveSwingRatioR(140, 'swing', null)).toBe(2.6)
+    expect(effectiveSwingRatioR(136, 'swing', null)).toBeCloseTo(2.2, 5)
   })
 
   it('audibly moves the swung off-beat between 1:1 and 2.8:1', () => {

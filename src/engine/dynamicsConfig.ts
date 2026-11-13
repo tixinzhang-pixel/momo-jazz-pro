@@ -23,8 +23,8 @@ export interface SwingCurvePoint {
 export const DYNAMICS_CONFIG = {
   /**
    * A1. Two playing modes: HEAD and SOLO
-   * - HEAD applies to chorus 1 and last chorus when repeats >= 3;
-   *   chorus 1 only when repeats == 2; chorus 1 when repeats == 1.
+   * - HEAD applies to chorus 1, and to the last chorus whenever repeats >= 2
+   *   (a 2-chorus loop is head + out-head, so the theme plays on both).
    * - SOLO applies to all other choruses.
    */
   modes: {
@@ -32,25 +32,33 @@ export const DYNAMICS_CONFIG = {
       /** Ride band about 8 dB below its SOLO level (So What ref A/B measured 8-11 dB lower). */
       rideDbOffset: -8.0,
       /** Hi-hat foot / timekeeping prominence in HEAD (dB relative to normal hat). */
-      hatDbOffset: 1.5,
+      hatDbOffset: -14.5,
       /** Snare comping at its base level (0 dB reference), sparse: about 2-2.5 hits per bar (So What ref A/B). */
       snareCompDbOffset: 0.0,
-      /** Overall drum bus about 3-6 dB below SOLO average (So What ref A/B: -5.8 and -4.5 dB). */
-      drumBusDbOffset: -4.5,
-      /** Whether ride is light/sparse in HEAD (timekeeping mostly hi-hat on 2 & 4 + light ride/stick). */
+      /** Head drum bus, +1.5 dB vs the v0.3.1 offset of -4.5 so SOLO−HEAD can land in +3..+6. */
+      drumBusDbOffset: -3.0,
+      /** Whether ride is light/sparse in HEAD (timekeeping mostly hi-hat on 2 & 4 + a real ride pulse). */
       sparseRide: true,
-      /** Theme fills attenuation (A1/A3 table: theme fills reduce ~8 dB so they are not jarring). */
-      headFillDbAttenuation: -8.0,
+      /** Extra dB on HEAD ride strokes so the ride stem is audible under the hat. */
+      rideVelocityBoostDb: 0.4,
+      /**
+       * Theme fills, on top of the setup table. Tuned with the unclamped setup gain
+       * so head fills at bars 24/32 sit about 8 dB under the v0.3 renders.
+       */
+      headFillDbAttenuation: -7.0,
     },
     solo: {
-      /** Timekeeping on the ride (0 dB reference in SOLO). */
-      rideDbOffset: 0.0,
-      hatDbOffset: 0.0,
+      /** Solo ride sits above the head pattern so the ride band can land 2–3 dB under the snare. */
+      rideDbOffset: 5.2,
+      hatDbOffset: -3.5,
       /** Snare comping steps up per soloist block (see A2): +5 dB in block 1 up to +15 dB at peak vs HEAD (So What ref A/B). */
       snareCompBlock1Db: 5.0,
       snareCompPeakDb: 15.0,
-      /** Overall SOLO drum bus base (0 dB reference before block stepping). */
-      drumBusDbOffset: 0.0,
+      /**
+       * Extra solo drum-bus trim against the v0.3.1 anchor (−4.5 + block curve).
+       * −3.7 dB keeps SOLO−HEAD near +4 after the snare-bus ceiling quieted the fills.
+       */
+      drumBusDbOffset: -3.7,
     },
   },
 
@@ -68,7 +76,7 @@ export const DYNAMICS_CONFIG = {
     secondChorusSnareDb: 2.5,
     secondChorusDrumBusDb: 1.8,
     /** Start of next block drops 2.2 dB from previous block's peak (spec A2: 2-3 dB drop). */
-    newBlockDropDb: -2.2,
+    newBlockDropDb: -3.6,
     /** Net step per new block over previous block start: +1.2 dB (spec A2: 1-2 dB). */
     newBlockStepDb: 1.2,
     newBlockSnareStepDb: 3.0,
@@ -100,21 +108,24 @@ export const DYNAMICS_CONFIG = {
     earlyBarsQuietDrumBusDb: -1.0,
     /** Bar 8 (end of A1): light setup only in beats 3-4: drum bus +1-2 dB (So What ref A/B). */
     bar8Setup: {
-      drumBusDb: 1.0,
+      drumBusDb: 1.7,
       snareDb: 1.5,
       kickDb: 1.0,
     },
-    /** Bar 16 (end of A2, into bridge / form midpoint): medium setup in last 2 beats: drums +3 dB, snare +6 dB. */
+    /** Bar 16: medium setup. Snare stays near +6 dB; kick/tom contribution is pulled down so the drum bar is near +3. */
     bar16Setup: {
-      drumBusDb: 1.8,
-      snareDb: 4.8,
-      kickDb: 2.2,
+      drumBusDb: 0.6,
+      snareDb: 5.2,
+      kickDb: 0.2,
     },
-    /** Bar 24 (into last A) & Bar 32 (into next chorus): strong setup in last 2 beats: drums +6-8 dB, snare +12-16 dB, kick +7-11 dB. */
+    /**
+     * Bars 24 and 32. These dB values are applied as a separate gain (not velocity
+     * clamped at 1), so kick can come down and snare can come up independently.
+     */
     strongSetup: {
-      drumBusDb: 6.5,
-      snareDb: 14.0,
-      kickDb: 6.5,
+      drumBusDb: 2.2,
+      snareDb: 18,
+      kickDb: -9,
     },
     /** Bridge lift (bars 17-24 / B section): +1-3 dB on drum bus, slightly denser comping (So What ref A/B). */
     bridgeLift: {
@@ -144,9 +155,9 @@ export const DYNAMICS_CONFIG = {
     defaultDrumBusGain: 0.48,
     /**
      * Ride vs snare (5-12 kHz ride band vs 150-400 Hz snare band):
-     * Default ride fader set to 0.60 so ride band is 2-3 dB below snare band in SOLO.
+     * Default ride fader is 0.80 so the solo ride band can sit near the snare band.
      */
-    defaultRideFaderGain: 0.60,
+    defaultRideFaderGain: 0.8,
     rideExtraAttenuationDb: -3.0,
     /** Gentle high shelf on ride to darken bright samples: -2.5 dB above 6000 Hz (spec A4: -2 to -3 dB above ~6 kHz). */
     rideHighShelfHz: 6000,
@@ -166,10 +177,13 @@ export const DYNAMICS_CONFIG = {
       fastBpmThreshold: 180,
       humanizeVelDb: 1.5,
     },
-    /** Hi-hat foot on 2 and 4: subtle level, not above ride quarter notes (So What ref A/B). */
+    /** Hi-hat foot on 2 and 4: soft, dark chick tucked clearly under ride quarter notes. */
     hatPedal: {
-      beat2Vel: 0.46,
-      beat4Vel: 0.52,
+      mode: 'chick' as 'chick' | 'legacy',
+      beat2Vel: 0.44,
+      beat4Vel: 0.46,
+      /** Velocity humanization (~+-10% linear). */
+      humanizeVelDb: 0.82,
     },
     /**
      * Snare comping density (So What ref A/B):
@@ -177,6 +191,25 @@ export const DYNAMICS_CONFIG = {
      * - Fast tempo (> 160 BPM): 3-3.5 hits/bar in SOLO.
      * - Ghost notes stay well below comping accents.
      */
+    /**
+     * v0.3.2-beta.4 cross-stick (Timo: the rim click "steals the show").
+     * HEAD: one soft cross-stick per bar on beat 4 (eighth 6), laid back a few ms; no cross-stick on
+     * off-beats and no cross-stick catches doubling the So What answers. SOLO: none (snare cells only).
+     * Fills / trading keep their tables. `mode: 'legacy'` restores beta.3 behaviour for A/B renders.
+     */
+    crossStick: {
+      mode: 'beat4' as 'beat4' | 'beats24' | 'legacy',
+      /** Musical velocity before the HEAD snare-comp bus gain. */
+      baseVel: 0.3,
+      /** Beat 2 relative to beat 4 when mode is 'beats24'. */
+      beat2Db: -1.5,
+      /** So What answer bars (odd bars): beat 4 sits under the answer on 4&. */
+      answerBarDb: -2.5,
+      /** Extra lay-back on top of the snare pocket (+4 ms), uniform in this range, ms. */
+      laybackMs: [4, 9] as [number, number],
+      humanizeDb: 1.0,
+      duration: 0.12,
+    },
     snareComping: {
       fastTempoThresholdBpm: 160,
       headHitsPerBar: 2.25,
@@ -205,7 +238,7 @@ export const DYNAMICS_CONFIG = {
     headToSoloMaxDiffDb: 1.0,
     baseVelocity: 0.78,
     randomBeatVariationDb: 1.2,
-    skipNoteProbability: 0.08,
+    skipNoteProbability: 0.25,
     skipNoteAttenuationDb: -7.0,
   },
 
@@ -217,7 +250,9 @@ export const DYNAMICS_CONFIG = {
   piano: {
     soloHitsPerBar: 3.0,
     headHitsPerBar: 1.75,
-    blockIntensityFollowRatio: 0.25,
+    blockIntensityFollowRatio: 0.12,
+    /** Extra SOLO comp trim so piano solo−head lands near +2 dB once the attack count is included. */
+    soloTrimDb: -0.5,
     baseVelocity: 0.74,
     defaultMixerGain: 0.82,
   },
@@ -249,7 +284,6 @@ export const DYNAMICS_CONFIG = {
    * Swing ratio r = long:short duration of a swung pair. Off-beat sits at fraction r/(r+1) of the beat.
    */
   swing: {
-    provisionalPendingDeanReview: true,
     sliderMin: 1.0,
     sliderMax: 3.5,
     sliderStep: 0.05,
@@ -262,17 +296,21 @@ export const DYNAMICS_CONFIG = {
     /**
      * Per-style default curves (BPM -> long:short ratio r).
      * PROVISIONAL, pending Dean review.
-     * Measured: So What ref A 2.3-2.9 @ 136-139 BPM, ref B 1.3-1.45 @ 180 BPM.
+     * At 136 BPM the curve is 2.20. With the ride 4 ms late, that is heard at about 2.30,
+     * which is Kind of Blue's head (2.30–2.36). Faster tempos fall toward 1.5.
+     * Each bar breathes ±0.06 around this curve.
      */
     styleCurves: {
       swing: [
-        { bpm: 140, ratio: 2.6 },
+        { bpm: 90, ratio: 2.4 },
+        { bpm: 136, ratio: 2.2 },
         { bpm: 180, ratio: 1.5 },
         { bpm: 220, ratio: 1.2 },
         { bpm: 260, ratio: 1.1 },
       ],
       up: [
-        { bpm: 140, ratio: 2.6 },
+        { bpm: 90, ratio: 2.4 },
+        { bpm: 136, ratio: 2.2 },
         { bpm: 180, ratio: 1.5 },
         { bpm: 220, ratio: 1.2 },
         { bpm: 260, ratio: 1.1 },

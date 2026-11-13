@@ -61,10 +61,18 @@ export interface MusicalShape {
  * - When loop count is 1, HEAD is used.
  * - SOLO applies to all other choruses.
  */
+/** Solo tempo nudge. Off unless `tempo.pushInSolosDefault` is set; the ratio is `pushInSolosRatio`. */
+export function effectiveBpm(bpm: number, mode: PlayingMode, dynamics: DynamicsMode): number {
+  if (dynamics !== 'auto' || mode !== 'SOLO') return bpm
+  if (!DYNAMICS_CONFIG.tempo.pushInSolosDefault) return bpm
+  return bpm * DYNAMICS_CONFIG.tempo.pushInSolosRatio
+}
+
 export function playingModeAt(chorus: number, repeats: number | null): PlayingMode {
   if (repeats != null && repeats <= 1) return 'HEAD'
   if (chorus <= 0) return 'HEAD'
-  if (repeats != null && repeats >= 3 && chorus >= repeats - 1) return 'HEAD'
+  // Two choruses is head + out-head. The theme plays on both, never a solo chorus.
+  if (repeats != null && repeats >= 2 && chorus >= repeats - 1) return 'HEAD'
   return 'SOLO'
 }
 
@@ -72,7 +80,6 @@ export function chorusRole(chorus: number, repeats: number | null): ChorusRole {
   if (repeats != null && repeats <= 1) return 'head'
   if (chorus <= 0) return 'head'
   if (repeats == null) return chorus >= 3 ? 'shout' : 'build'
-  if (repeats === 2) return 'build'
   if (chorus >= repeats - 1) return 'out'
   if (chorus === repeats - 2) return 'shout'
   return 'build'
@@ -180,24 +187,40 @@ export function musicalShape(input: ShapeInput): MusicalShape {
         density = 0.44
       }
     } else {
-      // A1 & A2: SOLO mode with 2-chorus soloist blocks
-      // Inside a block, 2nd chorus steps up (+3.4 dB net on ride); new block drops back ~2.2 dB from prev peak
+      // SOLO blocks. The bus is anchored to the v0.3.1 head (-4.5), then trimmed,
+      // so raising the HEAD bus does not also raise the solos.
       const inBlockBusDb = chorusInBlock === 1 ? cfg.blocks.secondChorusDrumBusDb : 0
-      const blockBaseBusDb = Math.min(
-        cfg.blocks.maxDrumBusOverHeadDb - cfg.blocks.secondChorusDrumBusDb,
-        3.2 + soloBlock * cfg.blocks.newBlockStepDb,
-      )
-      const totalOverHeadDb = Math.min(cfg.blocks.maxDrumBusOverHeadDb, blockBaseBusDb + inBlockBusDb)
+      const blockBase = (block: number) =>
+        Math.min(
+          cfg.blocks.maxDrumBusOverHeadDb - cfg.blocks.secondChorusDrumBusDb,
+          3.2 + block * cfg.blocks.newBlockStepDb,
+        )
+      let totalOverHeadDb = Math.min(cfg.blocks.maxDrumBusOverHeadDb, blockBase(soloBlock) + inBlockBusDb)
+      if (soloBlock > 0) {
+        const prevPeak = Math.min(
+          cfg.blocks.maxDrumBusOverHeadDb,
+          blockBase(soloBlock - 1) + cfg.blocks.secondChorusDrumBusDb,
+        )
+        // newBlockDropDb is the drop from the previous block's peak. The second
+        // chorus of the new block steps up from that dropped start.
+        totalOverHeadDb = Math.min(
+          cfg.blocks.maxDrumBusOverHeadDb,
+          prevPeak + cfg.blocks.newBlockDropDb + inBlockBusDb,
+        )
+      }
 
-      drumBusDb = cfg.modes.head.drumBusDbOffset + totalOverHeadDb
-      const blockBaseRideDb = cfg.modes.solo.rideDbOffset
-      rideDb = blockBaseRideDb + (chorusInBlock === 1 ? cfg.blocks.secondChorusRideDb : 0)
+      drumBusDb = -4.5 + totalOverHeadDb + cfg.modes.solo.drumBusDbOffset
+      // Hold the ride at the in-block peak on a new block so the bus drop is the
+      // ride drop, instead of stacking a full ride reset on top of it.
+      const rideStep = soloBlock > 0 || chorusInBlock === 1 ? cfg.blocks.secondChorusRideDb : 0
+      rideDb = cfg.modes.solo.rideDbOffset + rideStep
 
       const blockBaseSnareDb = Math.min(
         cfg.modes.solo.snareCompPeakDb - cfg.blocks.secondChorusSnareDb,
         cfg.modes.solo.snareCompBlock1Db + soloBlock * cfg.blocks.newBlockSnareStepDb,
       )
       snareCompDb = blockBaseSnareDb + (chorusInBlock === 1 ? cfg.blocks.secondChorusSnareDb : 0)
+      if (soloBlock > 0) snareCompDb += cfg.blocks.newBlockStepDb
       hatDb = cfg.modes.solo.hatDbOffset
       density = Math.min(0.98, 0.76 + soloBlock * 0.06 + chorusInBlock * 0.08)
     }
@@ -335,9 +358,9 @@ export function musicalShape(input: ShapeInput): MusicalShape {
     drumBusGain: clamp(dbToGain(drumBusDb), 0.25, 1.8),
     rideGain: clamp(dbToGain(drumBusDb + rideDb + cfg.voicing.rideExtraAttenuationDb), 0.12, 1.5),
     snareCompGain: clamp(dbToGain(drumBusDb + snareCompDb * 0.55), 0.1, 2.2),
-    hatGain: clamp(dbToGain(drumBusDb + hatDb), 0.25, 1.5),
+    hatGain: clamp(dbToGain(drumBusDb + hatDb), 0.04, 1.5),
     kickSetupGain: clamp(dbToGain(setupDrumDb + setupKickDb * 0.65), 0.5, 3.2),
-    snareSetupGain: clamp(dbToGain(setupDrumDb + setupSnareDb * 0.65), 0.5, 3.5),
+    snareSetupGain: clamp(dbToGain(setupDrumDb + setupSnareDb * 0.65), 0.5, 8),
     bassGain: clamp(dbToGain(bassDb), 0.82, 1.18),
     pianoGain: clamp(dbToGain(pianoDb), 0.45, 1.45),
   }

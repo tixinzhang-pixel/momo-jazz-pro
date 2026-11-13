@@ -26,12 +26,13 @@ export function playHit(
     playClick(ctx, graph.click, book, when, hit.velocity)
     return
   }
+  const gain = hit.gain ?? 1
   if (hit.drum === 'brushSwirl' || hit.drum === 'brushTap') {
-    playBrush(ctx, graph.kit.brush, book, when, hit.duration, hit.velocity, hit.drum === 'brushSwirl', hit.pan)
+    playBrush(ctx, graph.kit.brush, book, when, hit.duration, hit.velocity, gain, hit.drum === 'brushSwirl', hit.pan)
     return
   }
   if (hit.part === 'drums' && hit.drum) {
-    playDrum(ctx, graph, bank, book, hit.drum, when, hit.velocity, hit.duration, hit.pan)
+    playDrum(ctx, graph, bank, book, hit.drum, when, hit.velocity, gain, hit.duration, hit.pan)
     return
   }
   if (hit.midi == null) return
@@ -39,12 +40,16 @@ export function playHit(
   const sample = nearestPitched(list, hit.midi)
   if (!sample) return
   const dest = hit.part === 'bass' ? graph.bass : hit.part === 'guitar' ? graph.guitar : graph.piano
-  playSample(ctx, dest, book, sample.buffer, when, hit.velocity, hit.duration, hit.pan, {
+  const level = hit.velocity * gain
+  playSample(ctx, dest, book, sample.buffer, when, level, hit.duration, hit.pan, {
     rate: Math.pow(2, (hit.midi - sample.midi) / 12),
-    filterHz: hit.part === 'bass' ? 700 + hit.velocity * 2200 : hit.part === 'guitar' ? 1400 + hit.velocity * 2800 : 1800 + hit.velocity * 6400,
+    filterHz: hit.part === 'bass' ? 700 + level * 2200 : hit.part === 'guitar' ? 1400 + level * 2800 : 1800 + level * 6400,
     trackGain: false,
+    legato: hit.part === 'bass',
+    pianoRelease: hit.part === 'piano' ? (hit.release ?? 'normal') : undefined,
+    midi: hit.midi,
   })
-  if (hit.part === 'bass') playFinger(ctx, graph.bass, book, when, hit.velocity)
+  if (hit.part === 'bass') playFinger(ctx, graph.bass, book, when, level)
 }
 
 function playDrum(
@@ -55,6 +60,7 @@ function playDrum(
   drum: DrumId,
   when: number,
   velocity: number,
+  gain: number,
   duration: number,
   pan: number,
 ): void {
@@ -67,7 +73,7 @@ function playDrum(
   if (!buffer) return
   const cents = ((index % 5) - 2) * 9
   const hat = drum === 'hatOpen'
-  const node = playSample(ctx, drumBus(graph, drum), book, buffer, when, velocity, duration, pan, {
+  const node = playSample(ctx, drumBus(graph, drum), book, buffer, when, velocity * gain, duration, pan, {
     detuneCents: cents,
     filterHz: drumFilter(drum, velocity),
     trackGain: hat,
@@ -101,7 +107,15 @@ function playSample(
   velocity: number,
   duration: number,
   pan: number,
-  opts: { rate?: number; detuneCents?: number; filterHz: number; trackGain: boolean },
+  opts: {
+    rate?: number
+    detuneCents?: number
+    filterHz: number
+    trackGain: boolean
+    legato?: boolean
+    pianoRelease?: 'soft' | 'normal'
+    midi?: number
+  },
 ): GainNode | null {
   const src = ctx.createBufferSource()
   src.buffer = buffer
@@ -112,24 +126,55 @@ function playSample(
   filter.frequency.value = opts.filterHz
   filter.Q.value = 0.6
   const gain = ctx.createGain()
+  const panner = ctx.createStereoPanner()
+  panner.pan.value = Math.max(-1, Math.min(1, pan))
   const drum = opts.detuneCents != null
   const amp = Math.pow(velocity, drum ? 1.15 : 1.35) * (drum ? 0.95 : 0.78)
   const natural = buffer.duration / Math.max(0.25, rate)
   const hold = duration > 0 ? Math.min(duration, natural) : natural
   gain.gain.setValueAtTime(Math.max(0.0008, amp), when)
-  if (duration > 0 && duration < natural - 0.02) {
-    const fadeAt = when + Math.max(0.02, hold - 0.03)
-    gain.gain.setValueAtTime(Math.max(0.0008, amp), fadeAt)
-    gain.gain.exponentialRampToValueAtTime(0.0008, fadeAt + 0.035)
+  if (opts.pianoRelease && duration > 0) {
+    const reg = Math.min(1, Math.max(0, ((opts.midi ?? 60) - 48) / 30))
+    const wobble = ((opts.midi ?? 60) % 7) / 7
+    let tau1 = (0.016 + 0.01 * wobble) * (1.15 - 0.3 * reg)
+    let tau2 = (0.05 + 0.025 * (((opts.midi ?? 60) * 3) % 7) / 7) * (1.2 - 0.4 * reg)
+    if (opts.pianoRelease === 'soft') {
+      tau1 *= 1.5
+      tau2 *= 1.35
+    }
+    const tail = Math.min(0.45, Math.max(0.12, tau2 * 8))
+    const curve = new Float32Array(64)
+    for (let i = 0; i < curve.length; i++) {
+      const t = (i / (curve.length - 1)) * tail
+      const g = 0.72 * Math.exp(-t / tau1) + 0.28 * Math.exp(-t / tau2)
+      curve[i] = Math.max(0.0008, amp * g)
+    }
+    const holdEnd = when + Math.max(0.02, hold)
+    gain.gain.setValueCurveAtTime(curve, holdEnd, tail)
+    src.connect(filter)
+    filter.connect(gain)
+    gain.connect(panner)
+    panner.connect(dest)
+    src.start(when)
+    src.stop(holdEnd + tail + 0.02)
+    book.active.push(src)
+    return opts.trackGain ? gain : null
   }
-  const panner = ctx.createStereoPanner()
-  panner.pan.value = Math.max(-1, Math.min(1, pan))
+  if (duration > 0 && duration < natural - 0.02) {
+    // Bass stays up until 6 ms before the next onset, then a short overlap.
+    // Other notes keep the older 30 ms release.
+    const release = opts.legato ? 0.006 : 0.03
+    const fadeAt = when + Math.max(0.012, hold - release)
+    gain.gain.setValueAtTime(Math.max(0.0008, amp), fadeAt)
+    if (opts.legato) gain.gain.setTargetAtTime(0.0008, fadeAt, 0.007)
+    else gain.gain.exponentialRampToValueAtTime(0.0008, fadeAt + 0.035)
+  }
   src.connect(filter)
   filter.connect(gain)
   gain.connect(panner)
   panner.connect(dest)
   src.start(when)
-  src.stop(when + hold + 0.06)
+  src.stop(when + hold + (opts.legato ? 0.045 : 0.06))
   book.active.push(src)
   return opts.trackGain ? gain : null
 }
@@ -168,9 +213,11 @@ function playBrush(
   when: number,
   duration: number,
   velocity: number,
+  hitGain: number,
   swirl: boolean,
   pan: number,
 ): void {
+  velocity *= hitGain
   const src = ctx.createBufferSource()
   src.buffer = noiseBuffer(ctx, book)
   src.loop = true

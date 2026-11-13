@@ -11,7 +11,7 @@ import type { ChartId, ClickMode, DrumMix, Mixer, RoleId, StyleId } from './type
  * sits 2-3 dB below the snare band in SOLO. Snare and kick sit slightly above unity.
  */
 export const DEFAULT_DRUM_MIX: DrumMix = {
-  ride: DYNAMICS_CONFIG.voicing.defaultRideFaderGain, // 0.38 (~ -8.4 dB)
+  ride: DYNAMICS_CONFIG.voicing.defaultRideFaderGain, // 0.80 (~ -1.9 dB)
   hat: 0.92,
   snare: 1.24,
   kick: 1.18,
@@ -96,6 +96,8 @@ export interface Session {
   swingRatioOverride: number | null
   /** Scope B Subdivision toggle: '8ths' | '16th-swing' | '16th-straight'. */
   subdivision: SubdivisionMode
+  /** So What only. 0 off, or a 4- or 8-bar bass-call intro before the head. */
+  introBars: 0 | 4 | 8
   tuneId: string
   bpm: number
   transpose: number
@@ -107,29 +109,47 @@ export interface Session {
 export const SESSION_KEY_V1 = 'momo-jazz-pro-v1'
 export const SESSION_KEY_V031 = 'momo-jazz-pro-v031'
 
+/** Exact v0.2 factory defaults. Only these values are rewritten; a custom fader is kept. */
+const V02_DEFAULTS = {
+  drums: 0.86,
+  bass: 0.8,
+  piano: 0.7,
+  reverb: 0.28,
+  hat: 1,
+  snare: 1.18,
+  kick: 1.26,
+  ride: [0.55, 0.38] as const,
+}
+
+function migrateLegacyNumber(value: number | undefined, legacy: number, next: number, fallback: number): number {
+  if (value == null) return fallback
+  return value === legacy ? next : value
+}
+
 export function migrateSessionMixer(parsedMixer: Partial<Mixer> | undefined, baseMixer?: Mixer): Mixer {
   const base = baseMixer ?? defaultMixer('bb')
   if (!parsedMixer) return { ...base }
-  const migratedDrums =
-    parsedMixer.drums === 0.86 // v0.2 legacy default
-      ? DYNAMICS_CONFIG.voicing.defaultDrumBusGain
-      : (parsedMixer.drums ?? base.drums)
-
   const legacyRide = parsedMixer.drumMix?.ride
   const migratedRide =
-    legacyRide === 0.55 || legacyRide === 0.38 // v0.2 (0.55) or v0.3 (0.38) old default
+    legacyRide === V02_DEFAULTS.ride[0] || legacyRide === V02_DEFAULTS.ride[1]
       ? DYNAMICS_CONFIG.voicing.defaultRideFaderGain
       : (legacyRide ?? DEFAULT_DRUM_MIX.ride)
 
   return {
     ...base,
     ...parsedMixer,
-    drums: migratedDrums,
+    drums: migrateLegacyNumber(parsedMixer.drums, V02_DEFAULTS.drums, DYNAMICS_CONFIG.voicing.defaultDrumBusGain, base.drums),
+    bass: migrateLegacyNumber(parsedMixer.bass, V02_DEFAULTS.bass, base.bass, base.bass),
+    piano: migrateLegacyNumber(parsedMixer.piano, V02_DEFAULTS.piano, base.piano, base.piano),
+    reverb: migrateLegacyNumber(parsedMixer.reverb, V02_DEFAULTS.reverb, base.reverb, base.reverb),
     mute: { ...base.mute, ...parsedMixer.mute },
     drumMix: {
       ...DEFAULT_DRUM_MIX,
       ...parsedMixer.drumMix,
       ride: migratedRide,
+      hat: migrateLegacyNumber(parsedMixer.drumMix?.hat, V02_DEFAULTS.hat, DEFAULT_DRUM_MIX.hat, DEFAULT_DRUM_MIX.hat),
+      snare: migrateLegacyNumber(parsedMixer.drumMix?.snare, V02_DEFAULTS.snare, DEFAULT_DRUM_MIX.snare, DEFAULT_DRUM_MIX.snare),
+      kick: migrateLegacyNumber(parsedMixer.drumMix?.kick, V02_DEFAULTS.kick, DEFAULT_DRUM_MIX.kick, DEFAULT_DRUM_MIX.kick),
     },
   }
 }
@@ -150,6 +170,7 @@ export function freshSession(): Session {
     fillsMode: 'section',
     swingRatioOverride: null,
     subdivision: '8ths',
+    introBars: 4,
     tuneId: 'jazz-blues-f',
     bpm: 132,
     transpose: 0,
@@ -178,6 +199,7 @@ export function loadSession(): Session {
       fillsMode: parsed.fillsMode ?? 'section',
       swingRatioOverride: parsed.swingRatioOverride === undefined ? null : parsed.swingRatioOverride,
       subdivision: parsed.subdivision ?? '8ths',
+      introBars: parsed.introBars === 0 || parsed.introBars === 4 || parsed.introBars === 8 ? parsed.introBars : base.introBars,
       mixer: migrateSessionMixer(parsed.mixer, base.mixer),
     }
     if (isMigrating) {

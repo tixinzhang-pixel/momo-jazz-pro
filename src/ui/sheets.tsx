@@ -149,6 +149,7 @@ export function PracticeSheet({
   swingRatioOverride,
   subdivision,
   bpm,
+  introBars,
   onChange,
   onClose,
 }: {
@@ -164,6 +165,8 @@ export function PracticeSheet({
   swingRatioOverride: number | null
   subdivision: SubdivisionMode
   bpm: number
+  /** Set only for So What, where a bass-call intro is optional. */
+  introBars?: 0 | 4 | 8
   onChange: (partial: {
     countIn?: 0 | 1 | 2
     click?: ClickMode
@@ -176,6 +179,7 @@ export function PracticeSheet({
     fillsMode?: FillsMode
     swingRatioOverride?: number | null
     subdivision?: SubdivisionMode
+    introBars?: 0 | 4 | 8
   }) => void
   onClose: () => void
 }) {
@@ -280,6 +284,19 @@ export function PracticeSheet({
           关
         </button>
       </div>
+
+      {introBars != null && (
+        <>
+          <p class="field-label">So What 前奏（贝斯 Call）</p>
+          <div class="segment">
+            {([0, 4, 8] as const).map((bars) => (
+              <button key={bars} type="button" class={introBars === bars ? 'on' : ''} onClick={() => onChange({ introBars: bars })}>
+                {bars === 0 ? '关' : `${bars} 小节`}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       <p class="field-label">风格</p>
       <div class="segment">
