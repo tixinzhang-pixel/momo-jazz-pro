@@ -62,6 +62,7 @@ export function App() {
     playBar: 0,
     countBeat: null,
     bpm: initial.session.bpm,
+    introBar: null,
   })
   const engine = useRef(new Engine())
   const sessionRef = useRef(session)
@@ -117,6 +118,7 @@ export function App() {
         fillsMode: current.fillsMode,
         swingRatioOverride: current.swingRatioOverride,
         subdivision: current.subdivision,
+        introBars: current.introBars,
       }
     }
     engine.current.onTempo = (bpm) => patch({ bpm })
@@ -250,7 +252,9 @@ export function App() {
   const sound = soundingKey(tune.key, session.transpose)
   const shown = displayKey(tune.key, session.transpose, session.chart)
   const turn = turnAt(head.status === 'playing' ? head.playBar : 0, session.tradeLen, session.userStarts, session.role ?? 'bb')
-  const mode = !session.tradeOn
+  const mode = head.introBar != null
+    ? `前奏 · 第 ${head.introBar + 1} 小节`
+    : !session.tradeOn
     ? head.status === 'playing'
       ? `伴奏 · 第 ${head.bar + 1} 小节`
       : '伴奏'
@@ -341,6 +345,7 @@ export function App() {
           swingRatioOverride={session.swingRatioOverride}
           subdivision={session.subdivision}
           bpm={session.bpm}
+          introBars={session.tuneId === 'so-what' ? session.introBars : undefined}
           onChange={(partial: {
             countIn?: 0 | 1 | 2
             click?: ClickMode
@@ -353,6 +358,7 @@ export function App() {
             fillsMode?: import('./engine/dynamicsConfig.ts').FillsMode
             swingRatioOverride?: number | null
             subdivision?: import('./engine/dynamicsConfig.ts').SubdivisionMode
+            introBars?: 0 | 4 | 8
           }) => patch(partial)}
           onClose={() => setSheet(null)}
         />
@@ -405,7 +411,7 @@ export function App() {
 }
 
 function sameHead(a: Playhead, b: Playhead): boolean {
-  return a.status === b.status && a.bar === b.bar && a.beat === b.beat && a.chorus === b.chorus && a.countBeat === b.countBeat && a.playBar === b.playBar
+  return a.status === b.status && a.bar === b.bar && a.beat === b.beat && a.chorus === b.chorus && a.countBeat === b.countBeat && a.playBar === b.playBar && a.introBar === b.introBar
 }
 
 function chartLabel(chart: ChartId): string {

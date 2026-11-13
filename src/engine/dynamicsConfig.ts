@@ -23,8 +23,8 @@ export interface SwingCurvePoint {
 export const DYNAMICS_CONFIG = {
   /**
    * A1. Two playing modes: HEAD and SOLO
-   * - HEAD applies to chorus 1 and last chorus when repeats >= 3;
-   *   chorus 1 only when repeats == 2; chorus 1 when repeats == 1.
+   * - HEAD applies to chorus 1, and to the last chorus whenever repeats >= 2
+   *   (a 2-chorus loop is head + out-head, so the theme plays on both).
    * - SOLO applies to all other choruses.
    */
   modes: {
@@ -35,22 +35,30 @@ export const DYNAMICS_CONFIG = {
       hatDbOffset: 1.5,
       /** Snare comping at its base level (0 dB reference), sparse: about 2-2.5 hits per bar (So What ref A/B). */
       snareCompDbOffset: 0.0,
-      /** Overall drum bus about 3-6 dB below SOLO average (So What ref A/B: -5.8 and -4.5 dB). */
-      drumBusDbOffset: -4.5,
-      /** Whether ride is light/sparse in HEAD (timekeeping mostly hi-hat on 2 & 4 + light ride/stick). */
+      /** Head drum bus, +1.5 dB vs the v0.3.1 offset of -4.5 so SOLO−HEAD can land in +3..+6. */
+      drumBusDbOffset: -3.0,
+      /** Whether ride is light/sparse in HEAD (timekeeping mostly hi-hat on 2 & 4 + a real ride pulse). */
       sparseRide: true,
-      /** Theme fills attenuation (A1/A3 table: theme fills reduce ~8 dB so they are not jarring). */
-      headFillDbAttenuation: -8.0,
+      /** Extra dB on HEAD ride strokes so the ride stem is audible under the hat. */
+      rideVelocityBoostDb: 0.4,
+      /**
+       * Theme fills, on top of the setup table. Tuned with the unclamped setup gain
+       * so head fills at bars 24/32 sit about 8 dB under the v0.3 renders.
+       */
+      headFillDbAttenuation: -7.0,
     },
     solo: {
-      /** Timekeeping on the ride (0 dB reference in SOLO). */
-      rideDbOffset: 0.0,
+      /** Solo ride sits above the head pattern so the ride band can land 2–3 dB under the snare. */
+      rideDbOffset: 5.2,
       hatDbOffset: 0.0,
       /** Snare comping steps up per soloist block (see A2): +5 dB in block 1 up to +15 dB at peak vs HEAD (So What ref A/B). */
       snareCompBlock1Db: 5.0,
       snareCompPeakDb: 15.0,
-      /** Overall SOLO drum bus base (0 dB reference before block stepping). */
-      drumBusDbOffset: 0.0,
+      /**
+       * Extra solo drum-bus trim against the v0.3.1 anchor (−4.5 + block curve).
+       * About −2 dB, so drums sit near −3 dB under bass in solo choruses.
+       */
+      drumBusDbOffset: -5.0,
     },
   },
 
@@ -68,7 +76,7 @@ export const DYNAMICS_CONFIG = {
     secondChorusSnareDb: 2.5,
     secondChorusDrumBusDb: 1.8,
     /** Start of next block drops 2.2 dB from previous block's peak (spec A2: 2-3 dB drop). */
-    newBlockDropDb: -2.2,
+    newBlockDropDb: -3.6,
     /** Net step per new block over previous block start: +1.2 dB (spec A2: 1-2 dB). */
     newBlockStepDb: 1.2,
     newBlockSnareStepDb: 3.0,
@@ -104,17 +112,20 @@ export const DYNAMICS_CONFIG = {
       snareDb: 1.5,
       kickDb: 1.0,
     },
-    /** Bar 16 (end of A2, into bridge / form midpoint): medium setup in last 2 beats: drums +3 dB, snare +6 dB. */
+    /** Bar 16: medium setup. Snare stays near +6 dB; kick/tom contribution is pulled down so the drum bar is near +3. */
     bar16Setup: {
-      drumBusDb: 1.8,
-      snareDb: 4.8,
-      kickDb: 2.2,
+      drumBusDb: 0.6,
+      snareDb: 5.2,
+      kickDb: 0.2,
     },
-    /** Bar 24 (into last A) & Bar 32 (into next chorus): strong setup in last 2 beats: drums +6-8 dB, snare +12-16 dB, kick +7-11 dB. */
+    /**
+     * Bars 24 and 32. These dB values are applied as a separate gain (not velocity
+     * clamped at 1), so kick can come down and snare can come up independently.
+     */
     strongSetup: {
-      drumBusDb: 6.5,
-      snareDb: 14.0,
-      kickDb: 6.5,
+      drumBusDb: 2.2,
+      snareDb: 18,
+      kickDb: -1.4,
     },
     /** Bridge lift (bars 17-24 / B section): +1-3 dB on drum bus, slightly denser comping (So What ref A/B). */
     bridgeLift: {
@@ -144,9 +155,9 @@ export const DYNAMICS_CONFIG = {
     defaultDrumBusGain: 0.48,
     /**
      * Ride vs snare (5-12 kHz ride band vs 150-400 Hz snare band):
-     * Default ride fader set to 0.60 so ride band is 2-3 dB below snare band in SOLO.
+     * Default ride fader is 0.80 so the solo ride band can sit near the snare band.
      */
-    defaultRideFaderGain: 0.60,
+    defaultRideFaderGain: 0.8,
     rideExtraAttenuationDb: -3.0,
     /** Gentle high shelf on ride to darken bright samples: -2.5 dB above 6000 Hz (spec A4: -2 to -3 dB above ~6 kHz). */
     rideHighShelfHz: 6000,
@@ -217,7 +228,9 @@ export const DYNAMICS_CONFIG = {
   piano: {
     soloHitsPerBar: 3.0,
     headHitsPerBar: 1.75,
-    blockIntensityFollowRatio: 0.25,
+    blockIntensityFollowRatio: 0.12,
+    /** Extra SOLO comp trim so piano solo−head lands near +2 dB once the attack count is included. */
+    soloTrimDb: -0.5,
     baseVelocity: 0.74,
     defaultMixerGain: 0.82,
   },
@@ -249,7 +262,6 @@ export const DYNAMICS_CONFIG = {
    * Swing ratio r = long:short duration of a swung pair. Off-beat sits at fraction r/(r+1) of the beat.
    */
   swing: {
-    provisionalPendingDeanReview: true,
     sliderMin: 1.0,
     sliderMax: 3.5,
     sliderStep: 0.05,

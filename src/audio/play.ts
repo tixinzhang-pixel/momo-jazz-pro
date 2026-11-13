@@ -26,12 +26,13 @@ export function playHit(
     playClick(ctx, graph.click, book, when, hit.velocity)
     return
   }
+  const gain = hit.gain ?? 1
   if (hit.drum === 'brushSwirl' || hit.drum === 'brushTap') {
-    playBrush(ctx, graph.kit.brush, book, when, hit.duration, hit.velocity, hit.drum === 'brushSwirl', hit.pan)
+    playBrush(ctx, graph.kit.brush, book, when, hit.duration, hit.velocity, gain, hit.drum === 'brushSwirl', hit.pan)
     return
   }
   if (hit.part === 'drums' && hit.drum) {
-    playDrum(ctx, graph, bank, book, hit.drum, when, hit.velocity, hit.duration, hit.pan)
+    playDrum(ctx, graph, bank, book, hit.drum, when, hit.velocity, gain, hit.duration, hit.pan)
     return
   }
   if (hit.midi == null) return
@@ -39,12 +40,13 @@ export function playHit(
   const sample = nearestPitched(list, hit.midi)
   if (!sample) return
   const dest = hit.part === 'bass' ? graph.bass : hit.part === 'guitar' ? graph.guitar : graph.piano
-  playSample(ctx, dest, book, sample.buffer, when, hit.velocity, hit.duration, hit.pan, {
+  const level = hit.velocity * gain
+  playSample(ctx, dest, book, sample.buffer, when, level, hit.duration, hit.pan, {
     rate: Math.pow(2, (hit.midi - sample.midi) / 12),
-    filterHz: hit.part === 'bass' ? 700 + hit.velocity * 2200 : hit.part === 'guitar' ? 1400 + hit.velocity * 2800 : 1800 + hit.velocity * 6400,
+    filterHz: hit.part === 'bass' ? 700 + level * 2200 : hit.part === 'guitar' ? 1400 + level * 2800 : 1800 + level * 6400,
     trackGain: false,
   })
-  if (hit.part === 'bass') playFinger(ctx, graph.bass, book, when, hit.velocity)
+  if (hit.part === 'bass') playFinger(ctx, graph.bass, book, when, level)
 }
 
 function playDrum(
@@ -55,6 +57,7 @@ function playDrum(
   drum: DrumId,
   when: number,
   velocity: number,
+  gain: number,
   duration: number,
   pan: number,
 ): void {
@@ -67,7 +70,7 @@ function playDrum(
   if (!buffer) return
   const cents = ((index % 5) - 2) * 9
   const hat = drum === 'hatOpen'
-  const node = playSample(ctx, drumBus(graph, drum), book, buffer, when, velocity, duration, pan, {
+  const node = playSample(ctx, drumBus(graph, drum), book, buffer, when, velocity * gain, duration, pan, {
     detuneCents: cents,
     filterHz: drumFilter(drum, velocity),
     trackGain: hat,
@@ -168,9 +171,11 @@ function playBrush(
   when: number,
   duration: number,
   velocity: number,
+  hitGain: number,
   swirl: boolean,
   pan: number,
 ): void {
+  velocity *= hitGain
   const src = ctx.createBufferSource()
   src.buffer = noiseBuffer(ctx, book)
   src.loop = true

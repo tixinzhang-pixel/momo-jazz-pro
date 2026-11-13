@@ -1,6 +1,6 @@
-import { arrangeBar, endingHits } from '../arrange.ts'
 import type { DynamicsMode } from '../dynamics.ts'
-import { passCompleted } from '../dynamics.ts'
+import { effectiveBpm, passCompleted, playingModeAt } from '../dynamics.ts'
+import type { arrangeBar, endingHits } from '../arrange.ts'
 import type { FillsMode, SubdivisionMode } from '../engine/dynamicsConfig.ts'
 import type { ClickMode, Mixer, StyleId, TradeSettings, Tune } from '../types.ts'
 import { loadBank, type LoadedBank } from './bank.ts'
@@ -22,6 +22,7 @@ export interface Snapshot {
   fillsMode?: FillsMode
   swingRatioOverride?: number | null
   subdivision?: SubdivisionMode
+  introBars?: 0 | 4 | 8
 }
 
 export interface Playhead {
@@ -32,10 +33,12 @@ export interface Playhead {
   playBar: number
   countBeat: number | null
   bpm: number
+  /** Set during a So What bass-call intro. The chart bar is not the form bar. */
+  introBar: number | null
 }
 
 interface Marker {
-  kind: 'count' | 'bar'
+  kind: 'count' | 'bar' | 'intro'
   time: number
   beat: number
   bar: number
@@ -43,6 +46,7 @@ interface Marker {
   playBar: number
   dur: number
   bpm: number
+  introBar?: number
 }
 
 export class Engine {
@@ -59,7 +63,10 @@ export class Engine {
   private playBar = 0
   private phase: 'count' | 'play' | 'ending' = 'play'
   private countLeft = 0
+  private introLeft = 0
+  private introIndex = 0
   private finishAt = 0
+  private arrange: { arrangeBar: typeof arrangeBar; endingHits: typeof endingHits } | null = null
   private markers: Marker[] = []
   private wakeLock: WakeLockSentinel | null = null
 
@@ -81,6 +88,7 @@ export class Engine {
     src.connect(ctx.destination)
     src.start()
     await resumed
+    this.arrange ??= await import('../arrange.ts')
     if (!this.bank) {
       if (!this.graph) this.graph = createGraph(ctx)
       this.bank = await loadBank(ctx, onProgress)
@@ -88,7 +96,7 @@ export class Engine {
   }
 
   start(): void {
-    if (!this.ctx || !this.graph || !this.bank) return
+    if (!this.ctx || !this.graph || !this.bank || !this.arrange) return
     void this.ctx.resume()
     this.haltSources()
     this.running = true
@@ -100,6 +108,9 @@ export class Engine {
     this.playBar = 0
     this.phase = snap.countIn > 0 ? 'count' : 'play'
     this.countLeft = snap.countIn * 4
+    const intro = snap.tune.id === 'so-what' && !snap.loop ? (snap.introBars ?? 0) : 0
+    this.introLeft = intro
+    this.introIndex = 0
     this.nextTime = this.ctx.currentTime + 0.07
     this.markers = []
     this.book = createBook()
@@ -150,7 +161,7 @@ export class Engine {
   getPlayhead(): Playhead {
     const snapBpm = this.safeBpm()
     if (!this.ctx || !this.running) {
-      return { status: 'stopped', bar: 0, beat: 0, chorus: 0, playBar: 0, countBeat: null, bpm: snapBpm }
+      return { status: 'stopped', bar: 0, beat: 0, chorus: 0, playBar: 0, countBeat: null, bpm: snapBpm, introBar: null }
     }
     const heard = this.ctx.currentTime - (this.ctx.outputLatency || 0)
     let marker: Marker | null = null
@@ -164,6 +175,21 @@ export class Engine {
         playBar: 0,
         countBeat: marker?.beat ?? 0,
         bpm: marker?.bpm ?? snapBpm,
+        introBar: null,
+      }
+    }
+    if (marker.kind === 'intro') {
+      const beatLen = marker.dur / 4
+      const beat = beatLen > 0 ? Math.min(3, Math.max(0, Math.floor((heard - marker.time) / beatLen))) : 0
+      return {
+        status: 'playing',
+        bar: 0,
+        beat,
+        chorus: 0,
+        playBar: 0,
+        countBeat: null,
+        bpm: marker.bpm,
+        introBar: marker.introBar ?? 0,
       }
     }
     const beatLen = marker.dur / 4
@@ -176,6 +202,7 @@ export class Engine {
       playBar: marker.playBar,
       countBeat: null,
       bpm: marker.bpm,
+      introBar: null,
     }
   }
 
@@ -190,13 +217,13 @@ export class Engine {
   }
 
   private ahead(): void {
-    if (!this.ctx || !this.graph || !this.bank || this.phase === 'ending') return
+    if (!this.ctx || !this.graph || !this.bank || !this.arrange || this.phase === 'ending') return
     const horizon = this.ctx.currentTime + 0.12
     let guard = 0
     while (this.nextTime < horizon && guard < 6) {
       guard += 1
       const snap = this.snapshot()
-      const beatSec = 60 / snap.bpm
+      const countSec = 60 / snap.bpm
       if (this.phase === 'count') {
         const beat = (4 - (this.countLeft % 4)) % 4
         playHit(
@@ -214,20 +241,61 @@ export class Engine {
           bar: 0,
           chorus: 0,
           playBar: 0,
-          dur: beatSec,
+          dur: countSec,
           bpm: snap.bpm,
         })
-        this.nextTime += beatSec
+        this.nextTime += countSec
         this.countLeft -= 1
         if (this.countLeft <= 0) this.phase = 'play'
         continue
       }
-      const hits = arrangeBar({
+      const playing = this.introLeft > 0 ? 'HEAD' : playingModeAt(this.chorus, snap.repeats)
+      const bpm = effectiveBpm(snap.bpm, playing, snap.dynamics)
+      const beatSec = 60 / bpm
+      if (this.introLeft > 0) {
+        const introBar = this.introIndex
+        const hits = this.arrange.arrangeBar({
+          tune: snap.tune,
+          barIndex: introBar % 2,
+          chorus: 0,
+          playBar: introBar,
+          bpm,
+          style: snap.style,
+          transpose: snap.transpose,
+          trade: null,
+          click: snap.click,
+          humanize: true,
+          dynamics: snap.dynamics,
+          repeats: 1,
+          fillsMode: 'off',
+          swingRatioOverride: snap.swingRatioOverride,
+          subdivision: snap.subdivision,
+          intro: true,
+        })
+        for (const hit of hits) playHit(this.ctx, this.graph, this.bank, this.book, hit, this.nextTime)
+        const dur = beatSec * 4
+        this.markers.push({
+          kind: 'intro',
+          time: this.nextTime,
+          beat: 0,
+          bar: 0,
+          chorus: 0,
+          playBar: 0,
+          dur,
+          bpm,
+          introBar,
+        })
+        this.nextTime += dur
+        this.introIndex += 1
+        this.introLeft -= 1
+        continue
+      }
+      const hits = this.arrange.arrangeBar({
         tune: snap.tune,
         barIndex: this.bar,
         chorus: this.chorus,
         playBar: this.playBar,
-        bpm: snap.bpm,
+        bpm,
         style: snap.style,
         transpose: snap.transpose,
         trade: snap.trade,
@@ -249,7 +317,7 @@ export class Engine {
         chorus: this.chorus,
         playBar: this.playBar,
         dur,
-        bpm: snap.bpm,
+        bpm,
       })
       this.nextTime += dur
       this.playBar += 1
@@ -258,7 +326,7 @@ export class Engine {
       if (this.bar >= end) {
         const completed = this.chorus + 1
         if (passCompleted(completed, snap.repeats)) {
-          const ending = endingHits({
+          const ending = this.arrange.endingHits({
             tune: snap.tune,
             bpm: snap.bpm,
             style: snap.style,

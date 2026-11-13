@@ -19,9 +19,11 @@ export interface Graph {
   click: GainNode
   master: GainNode
   wet: GainNode
+  /** Post-compressor, post-trim node. Connected to the context destination unless `output` is set. */
+  preOut: AudioNode
 }
 
-export function createGraph(ctx: BaseAudioContext): Graph {
+export function createGraph(ctx: BaseAudioContext, opts?: { output?: AudioNode | null }): Graph {
   const master = ctx.createGain()
   master.gain.value = 0.92
   const highpass = ctx.createBiquadFilter()
@@ -43,7 +45,8 @@ export function createGraph(ctx: BaseAudioContext): Graph {
   highpass.connect(comp)
   comp.connect(shaper)
   shaper.connect(trim)
-  trim.connect(ctx.destination)
+  const output = opts && 'output' in opts ? opts.output : ctx.destination
+  if (output) trim.connect(output)
 
   const convolver = ctx.createConvolver()
   convolver.buffer = roomImpulse(ctx)
@@ -91,6 +94,7 @@ export function createGraph(ctx: BaseAudioContext): Graph {
     click: bus(0),
     master,
     wet,
+    preOut: trim,
   }
   applyDrumMix(graph, DEFAULT_DRUM_MIX, 0)
   return graph

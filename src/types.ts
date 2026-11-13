@@ -140,6 +140,11 @@ export interface Hit {
   drum?: DrumId
   midi?: number
   velocity: number
+  /**
+   * Linear amplitude applied with velocity. May exceed 1 so setup hits are not
+   * clamped. Omitted means 1 (the musical velocity already carries the level).
+   */
+  gain?: number
   /** Seconds. 0 means let a one-shot ring for its natural length. */
   duration: number
   pan: number

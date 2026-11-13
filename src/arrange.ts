@@ -49,6 +49,8 @@ export interface ArrangeInput {
   humanize: boolean
   dynamics?: DynamicsMode
   repeats?: number | null
+  /** So What only: bass call with the head groove, no piano answer. */
+  intro?: boolean
   fillsMode?: FillsMode
   swingRatioOverride?: number | null
   subdivision?: SubdivisionMode
@@ -286,10 +288,20 @@ export function arrangeBar(input: ArrangeInput): Hit[] {
       rng,
       humanize,
       playingMode: shape.playingMode,
+      fillsMode,
     })
   }
 
-  if (isSoWhatHead(tune, shape.playingMode)) {
+  if (input.intro && tune.id === 'so-what') {
+    addSoWhatIntro(hits, {
+      barIndex,
+      transpose,
+      beatSec,
+      ratio,
+      rng,
+      humanize,
+    })
+  } else if (isSoWhatHead(tune, shape.playingMode)) {
     addSoWhatHead(hits, {
       barIndex,
       form,
@@ -382,7 +394,9 @@ function applyShape(
     humanize: boolean
   },
 ): void {
-  if (shape.density < 0.68) {
+  // HEAD comping ghosts are part of the 2–2.5 hits/bar target. The density gate
+  // only thins SOLO/low-density bars, where those quiet notes are optional.
+  if (shape.density < 0.68 && shape.playingMode !== 'HEAD') {
     for (let i = hits.length - 1; i >= 0; i--) {
       const hit = hits[i]
       if (hit?.drum === 'snare' && hit.velocity < 0.36) hits.splice(i, 1)
@@ -468,7 +482,11 @@ function applyShape(
       }
     }
 
-    hit.velocity = Math.min(1, Math.max(0.02, hit.velocity * gain))
+    // Keep musical velocity in 0–1 and put the contour in `gain`, which may
+    // exceed 1. Folding it into velocity and clamping at 1 made every strong
+    // setup hit identical, so the fill table could not be retuned.
+    hit.velocity = Math.min(1, Math.max(0.02, hit.velocity))
+    hit.gain = Math.max(0.02, gain)
   }
 }
 
@@ -510,6 +528,7 @@ function addSwingDrums(
     rng: () => number
     humanize: boolean
     playingMode: PlayingMode
+    fillsMode: FillsMode
   },
 ): void {
   const cfg = DYNAMICS_CONFIG
@@ -605,8 +624,11 @@ function addSwingDrums(
   if (o.fill !== 'none') {
     const bank = o.fill === 'short' ? SHORT : o.fill === 'medium' ? MEDIUM : BIG
     const chosen = bank[(o.barIndex + o.chorus * 2) % bank.length]
+    // Section-mode bar 8 stays on the light short pattern. Every-4 bars 4 and 12
+    // use the same pattern and need a few extra dB or they disappear into the groove.
+    const shortBoost = o.fillsMode === 'every4' && o.fill === 'short' ? dbToGain(8.0) : 1
     for (const ev of chosen) {
-      push(ev.eighth, ev.drum, ev.vel, ev.drum === 'kick' ? 0.22 : 0.3)
+      push(ev.eighth, ev.drum, ev.vel * shortBoost, ev.drum === 'kick' ? 0.22 : 0.3)
     }
     // Anticipate crash on 4& into a new soloist block
     if (o.nextBarNewBlock && o.rng() < cfg.sections.crash.anticipateProbability) {
@@ -750,16 +772,18 @@ function ridePattern(o: {
   const skipVel = q24 * dbToGain(skipDb) // -8 dB at med tempo, -13 dB above 180 BPM
 
   if (o.playingMode === 'HEAD' && DYNAMICS_CONFIG.modes.head.sparseRide) {
-    // A1 HEAD: Timekeeping is mostly hi-hat (foot on 2 & 4 + light stick on closed hat), with gentle ride pulse
+    // HEAD still keeps time on the hat, but the ride pulse has to be audible.
+    // rideVelocityBoostDb is about +4 dB on top of the ride fader and the head bus.
+    const boost = dbToGain(DYNAMICS_CONFIG.modes.head.rideVelocityBoostDb)
     return [
-      { eighth: 0, drum: 'ride', vel: q13 },
+      { eighth: 0, drum: 'ride', vel: q13 * boost },
       { eighth: 2, drum: 'hatClosed', vel: 0.34 },
-      { eighth: 2, drum: 'ride', vel: q13 * 0.42 },
-      { eighth: 3, drum: 'ride', vel: skipVel },
-      { eighth: 4, drum: 'ride', vel: q13 * 0.95 },
+      { eighth: 2, drum: 'ride', vel: q13 * 0.58 * boost },
+      { eighth: 3, drum: 'ride', vel: skipVel * boost },
+      { eighth: 4, drum: 'ride', vel: q13 * 0.95 * boost },
       { eighth: 6, drum: 'hatClosed', vel: 0.36 },
-      { eighth: 6, drum: 'ride', vel: q13 * 0.42 },
-      { eighth: 7, drum: 'ride', vel: skipVel * 0.95 },
+      { eighth: 6, drum: 'ride', vel: q13 * 0.58 * boost },
+      { eighth: 7, drum: 'ride', vel: skipVel * 0.95 * boost },
     ]
   }
 
@@ -781,27 +805,32 @@ function ridePattern(o: {
  * - Ghost notes stay well below comping accents.
  */
 function snareCell(bar: number, chorus: number, bpm: number, playingMode: PlayingMode): DrumEv[] {
+  const cfg = DYNAMICS_CONFIG.voicing.snareComping
   const idx = (bar + chorus * 3) % HEAD_SNARE_CELLS.length
-  if (playingMode === 'HEAD') {
-    return HEAD_SNARE_CELLS[idx]
+  if (playingMode === 'HEAD') return fitHitCount(HEAD_SNARE_CELLS[idx], cfg.headHitsPerBar)
+  if (bpm > cfg.fastTempoThresholdBpm) {
+    return fitHitCount(FAST_SOLO_SNARE_CELLS[(bar + chorus * 5) % FAST_SOLO_SNARE_CELLS.length], cfg.soloFastHitsPerBar)
   }
-  if (bpm > DYNAMICS_CONFIG.voicing.snareComping.fastTempoThresholdBpm) {
-    return FAST_SOLO_SNARE_CELLS[(bar + chorus * 5) % FAST_SOLO_SNARE_CELLS.length]
-  }
-  return MED_SOLO_SNARE_CELLS[idx]
+  return fitHitCount(MED_SOLO_SNARE_CELLS[idx], cfg.soloMedHitsPerBar)
+}
+
+/** Drop extra hits when a config target is lower than the cell. Defaults keep the written cells. */
+function fitHitCount<T>(cell: T[], target: number): T[] {
+  const cap = Math.max(1, Math.ceil(target - 1e-6))
+  return cell.length > cap ? cell.slice(0, cap) : cell
 }
 
 const ACC = DYNAMICS_CONFIG.voicing.snareComping.accentBaseVel
 const GHOST = ACC * dbToGain(DYNAMICS_CONFIG.voicing.snareComping.ghostNoteAttenuationDb)
 
-// HEAD cells: average ~2.4 hits per bar (2 to 3 hits, keeping 2.0-2.5 hits/bar across full form)
+// HEAD cells: 18 hits / 8 bars = 2.25 comping hits per bar (ghosts kept; see applyShape).
 const HEAD_SNARE_CELLS: DrumEv[][] = [
-  [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 3, drum: 'sidestick', vel: ACC }, { eighth: 7, drum: 'snare', vel: GHOST }],
+  [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 3, drum: 'sidestick', vel: ACC }],
   [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 5, drum: 'sidestick', vel: ACC }],
-  [{ eighth: 2, drum: 'snare', vel: GHOST }, { eighth: 5, drum: 'sidestick', vel: ACC }, { eighth: 7, drum: 'snare', vel: GHOST }],
+  [{ eighth: 2, drum: 'snare', vel: GHOST }, { eighth: 5, drum: 'sidestick', vel: ACC }],
   [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 3, drum: 'sidestick', vel: ACC }, { eighth: 6, drum: 'sidestick', vel: ACC * 0.92 }],
   [{ eighth: 2, drum: 'sidestick', vel: ACC * 0.9 }, { eighth: 5, drum: 'sidestick', vel: ACC }],
-  [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 4, drum: 'sidestick', vel: ACC * 0.95 }, { eighth: 7, drum: 'snare', vel: GHOST }],
+  [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 4, drum: 'sidestick', vel: ACC * 0.95 }],
   [{ eighth: 2, drum: 'snare', vel: GHOST }, { eighth: 5, drum: 'sidestick', vel: ACC }, { eighth: 7, drum: 'sidestick', vel: ACC * 0.9 }],
   [{ eighth: 1, drum: 'snare', vel: GHOST }, { eighth: 3, drum: 'sidestick', vel: ACC }],
 ]
@@ -1156,6 +1185,17 @@ function swingBass(layout: LaidChord[], nextPc: number, prev: number | null, rng
     notes.push({ beat, midi, beats: 1 })
     last = midi
   }
+  return applyBassSkip(notes, rng)
+}
+
+/** Occasional softer passing note. Pitch choices above do not read this probability. */
+function applyBassSkip(notes: BassNote[], rng: () => number): BassNote[] {
+  const p = DYNAMICS_CONFIG.bass.skipNoteProbability
+  if (p <= 0 || notes.length < 3 || rng() >= p) return notes
+  const index = 1 + Math.floor(rng() * (notes.length - 2))
+  const note = notes[index]
+  if (!note) return notes
+  notes[index] = { ...note, skip: true, beats: Math.min(note.beats, 0.45) }
   return notes
 }
 
@@ -1300,6 +1340,7 @@ function addPianoComp(
 ): void {
   if (o.sparse && o.barIndex % 2 === 1) return
   const attacks = pianoAttacks(o)
+  const soloTrim = o.playingMode === 'SOLO' ? dbToGain(DYNAMICS_CONFIG.piano.soloTrimDb) : 1
   for (const attack of attacks) {
     const slot = chordAt(o.layout, Math.min(3.99, attack.beat))
     const chordIndex = o.layout.indexOf(slot)
@@ -1314,7 +1355,7 @@ function addPianoComp(
         part: 'piano',
         midi,
         velocity: humanVelocity(
-          (o.sparse ? attack.vel * 0.72 : attack.vel) * (i === notes.length - 1 ? 1 : 0.92),
+          (o.sparse ? attack.vel * 0.72 : attack.vel) * soloTrim * (i === notes.length - 1 ? 1 : 0.92),
           o.rng,
           o.humanize,
         ),
@@ -1363,7 +1404,7 @@ function pianoAttacks(o: {
     [{ beat: 0, beats: 1.8, vel: baseVel * 0.85 }, { beat: 3.5, beats: 0.8, vel: baseVel * 0.88 }],
   ]
   if (o.playingMode === 'HEAD') {
-    return headCells[(o.barIndex + o.chorus) % headCells.length]
+    return fitHitCount(headCells[(o.barIndex + o.chorus) % headCells.length], DYNAMICS_CONFIG.piano.headHitsPerBar)
   }
 
   // SOLO cells: ~3 hits per bar (~45% on beat [0, 1, 2, 3], ~30% on swung "&" anticipations [1.5, 3.5], ~25% other off-beats [0.5, 2.5])
@@ -1399,7 +1440,7 @@ function pianoAttacks(o: {
       { beat: 3.5, beats: 0.8, vel: baseVel * 0.98 },
     ],
   ]
-  return soloCells[(o.barIndex + o.chorus * 2) % soloCells.length]
+  return fitHitCount(soloCells[(o.barIndex + o.chorus * 2) % soloCells.length], DYNAMICS_CONFIG.piano.soloHitsPerBar)
 }
 
 function addPianoSolo(
@@ -1760,19 +1801,20 @@ export function endingHits(input: {
 }
 
 /**
- * Task B: Determine whether the bar should play So What's iconic head theme.
- * Active in HEAD mode (chorus 0 and out-head when repeats >= 3).
+ * So What head theme. HEAD choruses only, including the out-head when the
+ * loop is 2 choruses (the last chorus is a head, not a solo).
  */
 export function isSoWhatHead(tune: Tune, playingMode: PlayingMode): boolean {
   return tune.id === 'so-what' && playingMode === 'HEAD'
 }
 
 /**
- * Task B: So What theme notes, beat alignments, and Bill Evans quartal voicings.
- * 2-bar call and response cell:
- * - Call bar (barIndex % 2 === 0): Paul Chambers bass riff, piano silent.
- * - Response bar (barIndex % 2 === 1): Bass resolves to tonic on beat 3;
- *   Band / Piano answers on Beat 3 (beat = 2.0) and Beat 4& (beat = 3.5).
+ * Kind of Blue bass call and the piano answer (Bill Evans quartal voicing).
+ * Call bar, beats in the bar (0 = downbeat):
+ *   rest, 1& D2, 2 A2, 2& B2, 3 C3, 3& D3, 4 E3, 4& C3 (weaker; Db3 on the bridge).
+ * Response bar: D3 on beat 1, held. Piano on beat 3 (E-A-D-G-B) and 4& (D-G-C-F-A).
+ * The bridge (Ebm7, bars 17–24) is the same pattern one semitone higher.
+ * There is no horn sample in the FluidR3 subset, so the answer stays on piano.
  */
 export function soWhatHeadNotes(
   barIndex: number,
@@ -1787,44 +1829,28 @@ export function soWhatHeadNotes(
   const cycleBar = barIndex % 2
 
   if (cycleBar === 0) {
-    // Call bar (odd 1-based bar: 1, 3, 5, 7, ... 31):
-    // Beat 2 (beat 1.0): D2 (38)
-    // Beat 3 (beat 2.0): A2 (45)
-    // Beat 3& (beat 2.5): B2 (47)
-    // Beat 4 (beat 3.0): C3 (48)
     return {
       bass: [
-        { beat: 1.0, midi: 38 + semitones, beats: 0.9, vel: 0.82 },
-        { beat: 2.0, midi: 45 + semitones, beats: 0.45, vel: 0.84 },
-        { beat: 2.5, midi: 47 + semitones, beats: 0.45, vel: 0.86 },
-        { beat: 3.0, midi: 48 + semitones, beats: 0.9, vel: 0.88 },
+        { beat: 0.5, midi: 38 + semitones, beats: 0.42, vel: 0.84 },
+        { beat: 1.0, midi: 45 + semitones, beats: 0.42, vel: 0.86 },
+        { beat: 1.5, midi: 47 + semitones, beats: 0.42, vel: 0.86 },
+        { beat: 2.0, midi: 48 + semitones, beats: 0.42, vel: 0.88 },
+        { beat: 2.5, midi: 50 + semitones, beats: 0.42, vel: 0.88 },
+        { beat: 3.0, midi: 52 + semitones, beats: 0.42, vel: 0.9 },
+        { beat: 3.5, midi: 48 + semitones, beats: 0.4, vel: 0.72 },
       ],
-      chords: [], // Piano stays silent during the bass call
+      chords: [],
     }
   }
 
-  // Response bar (even 1-based bar: 2, 4, 6, ... 32):
-  // Bass finishes motif:
-  // Beat 1 (beat 0.0): D3 (50)
-  // Beat 1& (beat 0.5): E3 (52)
-  // Beat 2 (beat 1.0): D3 (50)
-  // Beat 2& (beat 1.5): C3 (48)
-  // Beat 3 (beat 2.0): D2 (38)
-  //
-  // Band / Piano response on Beat 3 (beat 2.0) and Beat 4& (beat 3.5):
-  // Beat 3: Em11 (or Fm11 for Eb): [52, 57, 62, 67, 71] + semitones
-  // Beat 4&: Dm11 (or Ebm11 for Eb): [50, 55, 60, 65, 69] + semitones
+  // Last answer of each 8-bar section sits a little under the others.
+  const sectionEnd = barIndex % 8 === 7
+  const answerTrim = sectionEnd ? 0.63 : 1
   return {
-    bass: [
-      { beat: 0.0, midi: 50 + semitones, beats: 0.45, vel: 0.88 },
-      { beat: 0.5, midi: 52 + semitones, beats: 0.45, vel: 0.86 },
-      { beat: 1.0, midi: 50 + semitones, beats: 0.45, vel: 0.85 },
-      { beat: 1.5, midi: 48 + semitones, beats: 0.45, vel: 0.82 },
-      { beat: 2.0, midi: 38 + semitones, beats: 0.85, vel: 0.88 },
-    ],
+    bass: [{ beat: 0.0, midi: 50 + semitones, beats: 2.2, vel: 0.9 }],
     chords: [
-      { beat: 2.0, notes: [52, 57, 62, 67, 71].map((n) => n + semitones), vel: 0.92, durationBeats: 0.75 },
-      { beat: 3.5, notes: [50, 55, 60, 65, 69].map((n) => n + semitones), vel: 0.96, durationBeats: 0.75 },
+      { beat: 2.0, notes: [52, 57, 62, 67, 71].map((n) => n + semitones), vel: 0.9 * answerTrim, durationBeats: 0.85 },
+      { beat: 3.5, notes: [50, 55, 60, 65, 69].map((n) => n + semitones), vel: 0.94 * answerTrim, durationBeats: 0.7 },
     ],
   }
 }
@@ -1854,7 +1880,7 @@ function addSoWhatHead(
       time: place(when, 'bass', o.rng, o.humanize),
       part: 'bass',
       midi: b.midi,
-      velocity: humanVelocity(b.vel * o.shape.bassGain, o.rng, o.humanize),
+      velocity: humanVelocity(b.vel, o.rng, o.humanize),
       duration: b.beats * o.beatSec * 0.92,
       pan: -0.15,
     })
@@ -1868,7 +1894,7 @@ function addSoWhatHead(
         time: place(when, 'piano', o.rng, o.humanize) + i * 0.005,
         part: 'piano',
         midi,
-        velocity: humanVelocity(c.vel * o.shape.pianoGain, o.rng, o.humanize),
+        velocity: humanVelocity(c.vel, o.rng, o.humanize),
         duration: c.durationBeats * o.beatSec * 0.92,
         pan: -0.22,
       })
@@ -1883,10 +1909,36 @@ function addSoWhatHead(
         time: place(when, 'snare', o.rng, o.humanize),
         part: 'drums',
         drum: 'sidestick',
-        velocity: humanVelocity(0.52 * o.shape.drumBusGain, o.rng, o.humanize),
+        velocity: humanVelocity(0.48, o.rng, o.humanize),
         duration: 0.12,
         pan: 0.16,
       })
     }
+  }
+}
+
+/** Intro: the same bass call, no piano answer. Drums are the normal head groove. */
+function addSoWhatIntro(
+  hits: Hit[],
+  o: {
+    barIndex: number
+    transpose: number
+    beatSec: number
+    ratio: number
+    rng: () => number
+    humanize: boolean
+  },
+): void {
+  const head = soWhatHeadNotes(o.barIndex, o.transpose, 'A')
+  for (const b of head.bass) {
+    const when = swungBeatOffset(b.beat, o.beatSec, o.ratio)
+    hits.push({
+      time: place(when, 'bass', o.rng, o.humanize),
+      part: 'bass',
+      midi: b.midi,
+      velocity: humanVelocity(b.vel, o.rng, o.humanize),
+      duration: b.beats * o.beatSec * 0.92,
+      pan: -0.15,
+    })
   }
 }

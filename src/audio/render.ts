@@ -3,7 +3,7 @@ import { findTune } from '../data/tunes.ts'
 import type { DynamicsMode } from '../dynamics.ts'
 import { DYNAMICS_CONFIG, type FillsMode, type SubdivisionMode } from '../engine/dynamicsConfig.ts'
 import { DEFAULT_DRUM_MIX } from '../session.ts'
-import type { StyleId } from '../types.ts'
+import type { RoleId, StyleId } from '../types.ts'
 import { loadBank } from './bank.ts'
 import { applyDrumMix, createGraph } from './graph.ts'
 import { createBook, playHit } from './play.ts'
@@ -17,6 +17,12 @@ export interface RenderOptions {
   fillsMode?: FillsMode
   swingRatioOverride?: number | null
   subdivision?: SubdivisionMode
+  trade?: { on: boolean; len: 4 | 8; userStarts: boolean; role: RoleId } | null
+  introBars?: 0 | 4 | 8
+  /** Render only this many form choruses, beginning at chorusStart. `repeats` still decides HEAD/SOLO. */
+  chorusStart?: number
+  repeats?: number
+  ending?: boolean
 }
 
 /**
@@ -35,9 +41,14 @@ export async function renderTuneWav(
   const fillsMode = options.fillsMode ?? 'section'
   const swingRatioOverride = options.swingRatioOverride ?? null
   const subdivision = options.subdivision ?? '8ths'
+  const trade = options.trade ?? null
+  const introBars = tune.id === 'so-what' ? (options.introBars ?? 0) : 0
+  const chorusStart = options.chorusStart ?? 0
+  const repeats = options.repeats ?? chorusStart + choruses
+  const withEnding = options.ending !== false && chorusStart + choruses >= repeats
   const bars = tune.bars.length * choruses
   const barDur = (60 / bpm) * 4
-  const seconds = barDur * bars + 4.2
+  const seconds = barDur * (bars + introBars) + (withEnding ? 4.2 : 0.4)
   const ctx = new OfflineAudioContext(2, Math.ceil(44100 * seconds), 44100)
   const bank = await loadBank(ctx, () => {})
   const graph = createGraph(ctx)
@@ -50,13 +61,11 @@ export async function renderTuneWav(
   applyDrumMix(graph, DEFAULT_DRUM_MIX, 0)
   const book = createBook()
   let t = 0.08
-  for (let i = 0; i < bars; i++) {
-    const bar = i % tune.bars.length
-    const chorus = Math.floor(i / tune.bars.length)
+  for (let i = 0; i < introBars; i++) {
     const hits = arrangeBar({
       tune,
-      barIndex: bar,
-      chorus,
+      barIndex: i % 2,
+      chorus: 0,
       playBar: i,
       bpm,
       style,
@@ -65,7 +74,31 @@ export async function renderTuneWav(
       click: 'off',
       humanize: true,
       dynamics,
-      repeats: choruses,
+      repeats: 1,
+      fillsMode: 'off',
+      swingRatioOverride,
+      subdivision,
+      intro: true,
+    }).filter((hit) => hit.part !== 'guitar')
+    for (const hit of hits) playHit(ctx, graph, bank, book, hit, t)
+    t += barDur
+  }
+  for (let i = 0; i < bars; i++) {
+    const bar = i % tune.bars.length
+    const chorus = chorusStart + Math.floor(i / tune.bars.length)
+    const hits = arrangeBar({
+      tune,
+      barIndex: bar,
+      chorus,
+      playBar: chorus * tune.bars.length + bar,
+      bpm,
+      style,
+      transpose: 0,
+      trade,
+      click: 'off',
+      humanize: true,
+      dynamics,
+      repeats,
       fillsMode,
       swingRatioOverride,
       subdivision,
@@ -73,8 +106,10 @@ export async function renderTuneWav(
     for (const hit of hits) playHit(ctx, graph, bank, book, hit, t)
     t += barDur
   }
-  for (const hit of endingHits({ tune, bpm, style, transpose: 0, humanize: true })) {
-    if (hit.part !== 'guitar') playHit(ctx, graph, bank, book, hit, t)
+  if (withEnding) {
+    for (const hit of endingHits({ tune, bpm, style, transpose: 0, humanize: true })) {
+      if (hit.part !== 'guitar') playHit(ctx, graph, bank, book, hit, t)
+    }
   }
   const audio = await ctx.startRendering()
   let peak = 0

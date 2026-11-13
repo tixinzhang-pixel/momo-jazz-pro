@@ -1,6 +1,6 @@
 # Momo Jazz Pro v0.3 Implementation Report
 
-> **提示**：v0.3.1 的最新修正与实测报告见 [V031_REPORT.md](file:///Users/timomo/momo-jazz-pro/V031_REPORT.md)。
+> **提示**：v0.3.1 的修正见 [V031_REPORT.md](V031_REPORT.md)。v0.3.2 的实测见 [V032_REPORT.md](V032_REPORT.md)。
 
 - **Branch:** `v0.3` (not pushed, not merged to `main`)
 - **Version:** `0.3.0-beta.1`
