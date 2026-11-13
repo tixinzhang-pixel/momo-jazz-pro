@@ -1,6 +1,6 @@
 # Momo Jazz Pro v0.3.2 — measured report
 
-Version `0.3.2-beta.2`, branch off `v0.3` at `f44baa2`. This report replaces the claims in `V031_REPORT.md` and the beta.1 fill table. Every new number below was measured on this build. Where a target is missed, it is marked missed.
+Version `0.3.2-beta.3`, branch off `v0.3` at `f44baa2`. This report replaces the claims in `V031_REPORT.md` and the beta.1 fill table. Feel numbers below were measured on beta.3. The fill table is the beta.2 measurement; a beta.3 recheck of the same v0.3.1 metric landed within 0.1 dB (bar 8 still +1.5, bar 16 +3.3, bars 24/32 +6.4/+6.2, kick 0–120 Hz +9.4/+7.7). Where a target is missed, it is marked missed.
 
 ## How it was measured
 
@@ -100,6 +100,24 @@ Ride minus snare in the solo is **−0.6** (target −2 to −3). The acceptance
 
 v0.3’s head bars 24/32 were +17.7 / +17.5 on the acceptance rig. This rig was not used to re-render that commit. On the v0.3.1 metric this build is **+11.3 / +11.6**, which is 6.4 / 5.9 dB under those figures, not a full 8. The acceptance of beta.1 read +11.4 / +10.4 on the same metric.
 
+## Feel, measured on beta.3
+
+Before numbers are the beta.2 diagnosis of `5c07fbc` (So What, 136 BPM, first solo chorus unless noted). After numbers are this build. Hit timing is from `arrangeBar`. The gap level is the bass stem, 8 ms before each next onset, relative to that note’s peak. Humanize is on for the jitter column and off for the grid offsets.
+
+| | beta.2 | beta.3 |
+|---|---|---|
+| Solo bass pitches, one chorus | 3 pitches, **80 of 128** are D1. First 8 bars are `D D D C♯` eight times | **18** pitches, **20 of 133** are D1 (15%). Range **E1–C3** (MIDI 28–48). Immediate repeats **0** |
+| First 8 solo bars | D–D–D–C♯ × 8 | `F1 E1 A1 C2`, `D2 C2 A1 C♯2`, `C2 D2 F1 B1`, `A1 G1 D2 B1`, `C2 D2 F2 A1`, `D2 E2 A1 C♯2`, `C2 A1 F2 C♯2`, `D2 B1 C2 Bb1` |
+| Beat 4 into the next downbeat | the same C♯, or nothing | **65%** chromatic, **100%** within a 2nd, 4th, or 5th. Beats 1 and 3 are chord tones on every bar |
+| Note length / IOI | **0.89** (395 ms of a 441 ms beat). Gap **45 ms**, level **−46 dB** | **1.00**. Level in the 8 ms before the next note **−12.4 dB** (p10 −14, p90 −10) |
+| Theme call length | every note **171 ms** (`0.42 × 0.92`) | the inter-onset interval: **138 ms** on the short 8th, **303 ms** on the long 8th. The answer hold is the written 2.2 beats |
+| Downbeat offset | ride **−6 ms**, bass scheduled **−4 ms** (heard late: the sample speaks ~8 ms later), snare **+10 ms**, piano **+14 ms** plus a 7 ms roll | ride **+4 ms**, bass scheduled **−14 ms** (heard about **10 ms before the ride** after the 8 ms speech), snare **+4 ms** (ghosts +8), piano attacks **+6 ms**, roll **3.5 ms** |
+| Jitter, humanize on, std | ride about **1 ms** | ride **3.9 ms**, bass **4.1 ms**, snare family **5.3 ms** |
+| Heard swing, grid-relative long:short | ride **2.43**, snare **2.93**, piano (every tone) **3.67**. Programmed ratio locked at **2.6** | ride **2.29**, snare **2.31**, piano attacks **2.42** (every tone 2.53). Programmed curve is **2.20** at 136, and each bar breathes ±0.06 |
+| Head ride, beats 2 and 4 vs 1 and 3 | **−4.6 dB** | **+1.5 dB**, the same accent as the solo |
+
+The bass line is deterministic: the same tune, chorus, and bar always produce the same notes. Walking quarters are not swung. The few swung pickups (5 in this chorus) sit on the bass pocket, so their grid-relative ratio is shallower (about 1.9). Ride, snare, and piano share the bar’s swing; their heard ratios sit together around 2.3.
+
 ## So What theme, as implemented
 
 Odd bars are the call (beat 1 is a rest). Even bars are the held answer note plus the piano chords. The bridge (bars 17–24, Ebm7) is the same pattern one semitone up. MIDI is written for D Dorian at transpose 0; D2 = 38.
@@ -132,4 +150,4 @@ The theme plays only on HEAD choruses. With 2 choruses the second chorus is the 
 
 ## Build
 
-`npm test`: 5 files, 54 passed. `npm run build` is clean. First-screen JS `index-*.js` is **33.0 KB gzip** (limit 40). The arranger loads when playback starts, not on the first screen. The render module stays split.
+`npm test`: 5 files, 55 passed. `npm run build` is clean. First-screen JS `index-*.js` is **33.1 KB gzip** (limit 40). The arranger loads when playback starts, not on the first screen. The render module stays split.

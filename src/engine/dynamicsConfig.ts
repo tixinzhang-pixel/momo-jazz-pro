@@ -216,7 +216,7 @@ export const DYNAMICS_CONFIG = {
     headToSoloMaxDiffDb: 1.0,
     baseVelocity: 0.78,
     randomBeatVariationDb: 1.2,
-    skipNoteProbability: 0.08,
+    skipNoteProbability: 0.25,
     skipNoteAttenuationDb: -7.0,
   },
 
@@ -274,17 +274,21 @@ export const DYNAMICS_CONFIG = {
     /**
      * Per-style default curves (BPM -> long:short ratio r).
      * PROVISIONAL, pending Dean review.
-     * Measured: So What ref A 2.3-2.9 @ 136-139 BPM, ref B 1.3-1.45 @ 180 BPM.
+     * At 136 BPM the curve is 2.20. With the ride 4 ms late, that is heard at about 2.30,
+     * which is Kind of Blue's head (2.30–2.36). Faster tempos fall toward 1.5.
+     * Each bar breathes ±0.06 around this curve.
      */
     styleCurves: {
       swing: [
-        { bpm: 140, ratio: 2.6 },
+        { bpm: 90, ratio: 2.4 },
+        { bpm: 136, ratio: 2.2 },
         { bpm: 180, ratio: 1.5 },
         { bpm: 220, ratio: 1.2 },
         { bpm: 260, ratio: 1.1 },
       ],
       up: [
-        { bpm: 140, ratio: 2.6 },
+        { bpm: 90, ratio: 2.4 },
+        { bpm: 136, ratio: 2.2 },
         { bpm: 180, ratio: 1.5 },
         { bpm: 220, ratio: 1.2 },
         { bpm: 260, ratio: 1.1 },

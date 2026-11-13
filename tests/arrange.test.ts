@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { arrangeBar, clearMusicCache, fillKind } from '../src/arrange.ts'
 import { findTune } from '../src/data/tunes.ts'
-import { eighthOffset, swingRatio } from '../src/feel.ts'
+import { barSwingFraction, eighthOffset, pocketBias, swingRatio } from '../src/feel.ts'
 import { chordTones, mod, parseChord } from '../src/theory.ts'
 import type { Hit } from '../src/types.ts'
 
@@ -32,10 +32,11 @@ function drums(hits: Hit[], drum: string) {
 
 describe('swing feel', () => {
   it('tightens the swing ratio as the tempo comes up, and bossa stays straight', () => {
-    // v0.3: at <=140 BPM, default swing r=2.6 -> fraction 2.6/3.6 = 0.722
-    expect(swingRatio(60, 'swing')).toBeGreaterThan(0.7)
-    expect(swingRatio(60, 'swing')).toBeLessThan(0.75)
-    expect(swingRatio(180, 'swing')).toBeLessThan(swingRatio(140, 'swing'))
+    // 136 BPM programs 2.20, heard a little deeper once the ride sits late.
+    expect(swingRatio(136, 'swing')).toBeCloseTo(2.2 / 3.2, 4)
+    expect(swingRatio(136, 'swing')).toBeGreaterThan(0.68)
+    expect(swingRatio(136, 'swing')).toBeLessThan(0.7)
+    expect(swingRatio(180, 'swing')).toBeLessThan(swingRatio(136, 'swing'))
     expect(swingRatio(220, 'swing')).toBeLessThan(0.56)
     expect(swingRatio(220, 'swing')).toBeGreaterThan(0.5)
     expect(swingRatio(132, 'bossa')).toBe(0.5)
@@ -50,10 +51,10 @@ describe('swing feel', () => {
     // Test in SOLO chorus (bar 2, avoiding bar 1 block crash) where ride is full and kick is feathered
     const bar = bars(3, 'swing', 132, { chorus: 1, repeats: 4 })[2]
     const beat = 60 / 132
-    const ratio = swingRatio(132, 'swing')
+    const ratio = barSwingFraction(132, 'swing', 2, 1, null, '8ths')
     const ride = drums(bar, 'ride').concat(drums(bar, 'rideBell'))
     expect(ride.length).toBeGreaterThanOrEqual(5)
-    const skip = eighthOffset(3, beat, ratio) - 0.006
+    const skip = eighthOffset(3, beat, ratio) + pocketBias('ride')
     expect(ride.some((hit) => Math.abs(hit.time - skip) < 0.004)).toBe(true)
     const hats = drums(bar, 'hatPedal')
     expect(hats).toHaveLength(2)
@@ -79,8 +80,60 @@ describe('swing feel', () => {
     const piano = bar.find((hit) => hit.part === 'piano')
     const bass = bar.find((hit) => hit.part === 'bass')
     expect(ride && piano && bass).toBeTruthy()
-    expect(ride!.time).toBeLessThan(piano!.time)
-    expect(bass!.time).toBeLessThan(piano!.time)
+    expect(bass!.time).toBeLessThan(ride!.time - 0.008)
+    expect(ride!.time).toBeLessThanOrEqual(piano!.time + 0.001)
+  })
+})
+
+describe('walking bass and shared swing', () => {
+  it('walks So What instead of repeating D, and keeps the head ride accent', () => {
+    clearMusicCache()
+    const tune = findTune('so-what')!
+    const midis: number[] = []
+    for (let bar = 0; bar < 32; bar++) {
+      const hits = arrangeBar({
+        tune,
+        barIndex: bar,
+        chorus: 1,
+        playBar: 32 + bar,
+        bpm: 136,
+        style: 'swing',
+        transpose: 0,
+        trade: null,
+        click: 'off',
+        humanize: false,
+        repeats: 6,
+      })
+      for (const hit of hits.filter((item) => item.part === 'bass')) midis.push(hit.midi ?? 0)
+    }
+    const d1 = midis.filter((midi) => midi === 38).length
+    expect(d1 / midis.length).toBeLessThan(0.3)
+    expect(new Set(midis).size).toBeGreaterThan(8)
+    let repeats = 0
+    for (let i = 1; i < midis.length; i++) if (midis[i] === midis[i - 1]) repeats++
+    expect(repeats / (midis.length - 1)).toBeLessThan(0.05)
+    expect(Math.min(...midis)).toBeGreaterThanOrEqual(28)
+    expect(Math.max(...midis)).toBeLessThanOrEqual(48)
+
+    const head = arrangeBar({
+      tune,
+      barIndex: 2,
+      chorus: 0,
+      playBar: 2,
+      bpm: 136,
+      style: 'swing',
+      transpose: 0,
+      trade: null,
+      click: 'off',
+      humanize: false,
+      repeats: 6,
+    })
+    const rides = head.filter((hit) => hit.drum === 'ride').sort((a, b) => a.time - b.time)
+    expect(rides[1].velocity).toBeGreaterThan(rides[0].velocity)
+    expect(rides[4].velocity).toBeGreaterThan(rides[3].velocity)
+    const call = head.filter((hit) => hit.part === 'bass').sort((a, b) => a.time - b.time)
+    const long = Math.max(...call.map((hit) => hit.duration))
+    expect(long).toBeGreaterThan(0.25)
   })
 })
 
@@ -91,13 +144,14 @@ describe('bass and piano', () => {
     const intervals: number[] = []
     for (let i = 0; i < line.length - 1; i++) {
       const notes = line[i]
-      expect(notes).toHaveLength(4)
-      for (const midi of notes) expect(midi).toBeGreaterThanOrEqual(34)
-      for (const midi of notes) expect(midi).toBeLessThanOrEqual(58)
+      expect(notes.length === 4 || notes.length === 5).toBe(true)
+      const quarters = notes.slice(0, 4)
+      for (const midi of notes) expect(midi).toBeGreaterThanOrEqual(28)
+      for (const midi of notes) expect(midi).toBeLessThanOrEqual(48)
       const next = line[i + 1][0]
-      intervals.push(Math.abs(notes[3] - next))
+      intervals.push(Math.abs(quarters[3] - next))
       for (let n = 1; n < notes.length; n++) expect(Math.abs(notes[n] - notes[n - 1])).toBeLessThanOrEqual(12)
-      expect(Math.abs(next - notes[3])).toBeLessThanOrEqual(12)
+      expect(Math.abs(next - quarters[3])).toBeLessThanOrEqual(12)
     }
     const close = intervals.filter((iv) => [1, 2, 5, 7].includes(iv) || iv === 0).length
     expect(close / intervals.length).toBeGreaterThan(0.7)

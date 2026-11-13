@@ -45,6 +45,7 @@ export function playHit(
     rate: Math.pow(2, (hit.midi - sample.midi) / 12),
     filterHz: hit.part === 'bass' ? 700 + level * 2200 : hit.part === 'guitar' ? 1400 + level * 2800 : 1800 + level * 6400,
     trackGain: false,
+    legato: hit.part === 'bass',
   })
   if (hit.part === 'bass') playFinger(ctx, graph.bass, book, when, level)
 }
@@ -104,7 +105,7 @@ function playSample(
   velocity: number,
   duration: number,
   pan: number,
-  opts: { rate?: number; detuneCents?: number; filterHz: number; trackGain: boolean },
+  opts: { rate?: number; detuneCents?: number; filterHz: number; trackGain: boolean; legato?: boolean },
 ): GainNode | null {
   const src = ctx.createBufferSource()
   src.buffer = buffer
@@ -121,9 +122,13 @@ function playSample(
   const hold = duration > 0 ? Math.min(duration, natural) : natural
   gain.gain.setValueAtTime(Math.max(0.0008, amp), when)
   if (duration > 0 && duration < natural - 0.02) {
-    const fadeAt = when + Math.max(0.02, hold - 0.03)
+    // Bass stays up until 6 ms before the next onset, then a short overlap.
+    // Other notes keep the older 30 ms release.
+    const release = opts.legato ? 0.006 : 0.03
+    const fadeAt = when + Math.max(0.012, hold - release)
     gain.gain.setValueAtTime(Math.max(0.0008, amp), fadeAt)
-    gain.gain.exponentialRampToValueAtTime(0.0008, fadeAt + 0.035)
+    if (opts.legato) gain.gain.setTargetAtTime(0.0008, fadeAt, 0.007)
+    else gain.gain.exponentialRampToValueAtTime(0.0008, fadeAt + 0.035)
   }
   const panner = ctx.createStereoPanner()
   panner.pan.value = Math.max(-1, Math.min(1, pan))
@@ -132,7 +137,7 @@ function playSample(
   gain.connect(panner)
   panner.connect(dest)
   src.start(when)
-  src.stop(when + hold + 0.06)
+  src.stop(when + hold + (opts.legato ? 0.045 : 0.06))
   book.active.push(src)
   return opts.trackGain ? gain : null
 }

@@ -18,8 +18,9 @@ import {
   humanVelocity,
   mulberry32,
   place,
+  pocketBias,
   sixteenthOffset,
-  swingRatio,
+  barSwingFraction,
   swungBeatOffset,
 } from './feel.ts'
 import type { Pocket } from './feel.ts'
@@ -67,6 +68,8 @@ interface BassNote {
   midi: number
   beats: number
   skip?: boolean
+  /** Phrase-arc and approach accent, in dB, added to the flat walking velocity. */
+  arcDb?: number
 }
 
 interface DrumEv {
@@ -93,7 +96,16 @@ const PAN: Record<DrumId, number> = {
   brushTap: 0.1,
 }
 
-const walkCache = new Map<string, BassNote[]>()
+type WalkShape = 'step' | 'arp' | 'enc'
+
+interface WalkCacheEntry {
+  notes: BassNote[]
+  shape: WalkShape
+  shapeRun: number
+  downbeat: number
+}
+
+const walkCache = new Map<string, WalkCacheEntry>()
 const voiceCache = new Map<string, number[]>()
 
 export function clearMusicCache(): void {
@@ -168,7 +180,7 @@ export function arrangeBar(input: ArrangeInput): Hit[] {
     subdivision = '8ths',
   } = input
   const beatSec = 60 / Math.max(40, bpm)
-  const ratio = swingRatio(bpm, style, swingRatioOverride, subdivision)
+  const ratio = barSwingFraction(bpm, style, barIndex, chorus, swingRatioOverride, subdivision)
   const subRatio =
     subdivision === '16th-swing'
       ? swingRatioOverride != null
@@ -377,6 +389,7 @@ export function arrangeBar(input: ArrangeInput): Hit[] {
     rng,
     humanize,
   })
+  legatoBass(hits, beatSec)
   return hits.sort((a, b) => a.time - b.time)
 }
 
@@ -788,12 +801,12 @@ function ridePattern(o: {
     return [
       { eighth: 0, drum: 'ride', vel: q13 * boost },
       { eighth: 2, drum: 'hatClosed', vel: 0.34 },
-      { eighth: 2, drum: 'ride', vel: q13 * 0.58 * boost },
+      { eighth: 2, drum: 'ride', vel: q24 * boost },
       { eighth: 3, drum: 'ride', vel: skipVel * boost },
-      { eighth: 4, drum: 'ride', vel: q13 * 0.95 * boost },
+      { eighth: 4, drum: 'ride', vel: q13 * boost },
       { eighth: 6, drum: 'hatClosed', vel: 0.36 },
-      { eighth: 6, drum: 'ride', vel: q13 * 0.58 * boost },
-      { eighth: 7, drum: 'ride', vel: skipVel * 0.95 * boost },
+      { eighth: 6, drum: 'ride', vel: q24 * boost },
+      { eighth: 7, drum: 'ride', vel: skipVel * 0.96 * boost },
     ]
   }
 
@@ -1111,40 +1124,49 @@ function addBass(
       o.style === 'bossa'
         ? note.beat * o.beatSec
         : swungBeatOffset(note.beat, o.beatSec, o.ratio)
-    const baseVel = note.skip
-      ? cfg.baseVelocity * dbToGain(cfg.skipNoteAttenuationDb)
-      : cfg.baseVelocity
+    const arc = dbToGain(note.arcDb ?? 0)
+    const baseVel =
+      (note.skip ? cfg.baseVelocity * dbToGain(cfg.skipNoteAttenuationDb) : cfg.baseVelocity) * arc
     hits.push({
       time: place(when, 'bass', o.rng, o.humanize),
       part: 'bass',
       midi: note.midi,
       velocity: humanizeDbVel(baseVel, cfg.randomBeatVariationDb, o.rng, o.humanize),
-      duration: note.beats * o.beatSec * (o.style === 'ballad' ? 1 : 0.92),
+      duration: note.beats * o.beatSec,
       pan: 0,
     })
   }
 }
 
+const BASS_LO = 28 // E1
+const BASS_HI = 48 // C3
+
 function ensureBass(tune: Tune, style: StyleId, transpose: number, chorus: number, bar: number): BassNote[] {
   const key = `${tune.id}|${style}|${transpose}|${chorus}|${bar}`
   const hit = walkCache.get(key)
-  if (hit) return hit
+  if (hit) return hit.notes
   let c = 0
   let b = 0
-  let prev: number | null = null
+  let shape: WalkShape = 'step'
+  let shapeRun = 0
+  let lastDown: number | null = null
   let last: BassNote[] = []
   while (c < chorus || (c === chorus && b <= bar)) {
     const k = `${tune.id}|${style}|${transpose}|${c}|${b}`
     const existing = walkCache.get(k)
     if (existing) {
-      prev = existing[existing.length - 1]?.midi ?? prev
-      last = existing
+      shape = existing.shape
+      shapeRun = existing.shapeRun
+      lastDown = existing.downbeat
+      last = existing.notes
     } else {
       const rng = mulberry32(hashString(`${k}|walk`))
-      const notes = bassLine(tune, style, transpose, b, prev, rng)
-      walkCache.set(k, notes)
-      prev = notes[notes.length - 1]?.midi ?? prev
-      last = notes
+      const entry = bassLine(tune, style, transpose, c, b, lastDown, shape, shapeRun, rng)
+      walkCache.set(k, entry)
+      shape = entry.shape
+      shapeRun = entry.shapeRun
+      lastDown = entry.downbeat
+      last = entry.notes
     }
     if (c === chorus && b === bar) return last
     b += 1
@@ -1156,79 +1178,151 @@ function ensureBass(tune: Tune, style: StyleId, transpose: number, chorus: numbe
   return last
 }
 
-function bassLine(tune: Tune, style: StyleId, transpose: number, barIndex: number, prev: number | null, rng: () => number): BassNote[] {
+function bassLine(
+  tune: Tune,
+  style: StyleId,
+  transpose: number,
+  chorus: number,
+  barIndex: number,
+  lastDown: number | null,
+  shape: WalkShape,
+  shapeRun: number,
+  rng: () => number,
+): WalkCacheEntry {
   const form = tune.bars.length
   const layout = layoutChords(tune.bars[barIndex], transpose)
-  const next = layoutChords(tune.bars[(barIndex + 1) % form], transpose)
+  const nextBar = (barIndex + 1) % form
+  const nextChorus = barIndex + 1 >= form ? chorus + 1 : chorus
+  const next = layoutChords(tune.bars[nextBar], transpose)
   const nextPc = next[0].chord.bass
-  if (style === 'bossa') return bossaBass(layout, nextPc, prev, barIndex)
-  if (style === 'ballad') return balladBass(layout, nextPc, prev, rng)
-  if (style === 'shuffle') return shuffleBass(layout, nextPc, prev, barIndex, rng)
-  return swingBass(layout, nextPc, prev, rng)
+  if (style === 'bossa') return plainWalk(bossaBass(layout, nextPc, lastDown, barIndex))
+  if (style === 'ballad') return plainWalk(balladBass(layout, nextPc, lastDown, rng))
+  const walked = swingWalk(tune, style, transpose, chorus, barIndex, nextChorus, nextBar, layout, next, lastDown, shape, shapeRun, rng)
+  if (style === 'shuffle') return { ...walked, notes: shufflePickups(walked.notes, barIndex) }
+  return walked
 }
 
-function swingBass(layout: LaidChord[], nextPc: number, prev: number | null, rng: () => number): BassNote[] {
-  const notes: BassNote[] = []
-  let last = prev
-  for (let beat = 0; beat < 4; beat++) {
-    const cur = chordAt(layout, beat)
-    const prevC = beat > 0 ? chordAt(layout, beat - 1) : null
-    const nextC = beat < 3 ? chordAt(layout, beat + 1) : null
-    const change = beat === 0 || cur.start !== prevC?.start
-    const nextChanges = Boolean(nextC && nextC.start !== cur.start)
-    let midi: number
-    if (change) {
-      midi = nearestPc(cur.chord.bass, last ?? 40 + cur.chord.bass)
-      if (last != null && Math.abs(midi - last) > 8) {
-        const alt = midi > last ? midi - 12 : midi + 12
-        if (alt >= 34 && alt <= 58) midi = alt
-      }
-      if (last != null && rng() < 0.18) {
-        const third = mod(cur.chord.root + guideIntervals(cur.chord.kind)[0])
-        const alt = nearestPc(third, last)
-        if (Math.abs(alt - last) <= 2) midi = alt
-      }
-    } else if (nextChanges || beat === 3) {
-      const destPc = nextChanges && nextC ? nextC.chord.bass : nextPc
-      midi = pickApproach(nearestPc(destPc, last ?? 48), last, rng)
-    } else {
-      const destPc = nextC ? nextC.chord.bass : nextPc
-      midi = pass(last ?? 48, destPc, cur.chord)
-    }
-    notes.push({ beat, midi, beats: 1 })
-    last = midi
-  }
-  return applyBassSkip(notes, rng)
-}
-
-/** Occasional softer passing note. Pitch choices above do not read this probability. */
-function applyBassSkip(notes: BassNote[], rng: () => number): BassNote[] {
-  const p = DYNAMICS_CONFIG.bass.skipNoteProbability
-  if (p <= 0 || notes.length < 3 || rng() >= p) return notes
-  const index = 1 + Math.floor(rng() * (notes.length - 2))
-  const note = notes[index]
-  if (!note) return notes
-  notes[index] = { ...note, skip: true, beats: Math.min(note.beats, 0.45) }
-  return notes
+function plainWalk(notes: BassNote[]): WalkCacheEntry {
+  return { notes, shape: 'step', shapeRun: 1, downbeat: notes[0]?.midi ?? 40 }
 }
 
 /**
- * Scope B Shuffle bass pattern: boogie/shuffle walking line with swung 8th skip pickups on beats 2& or 4&.
+ * Walking bass. Beat 1 and beat 3 are chord tones. Beat 4 approaches the next
+ * downbeat (chromatic, dominant, or scale). The register drifts through E1–C3.
+ * The same shape does not run more than two bars. A swung 8th pickup is occasional.
+ * The line is a pure function of the bar seed.
  */
-function shuffleBass(
-  layout: LaidChord[],
-  nextPc: number,
-  prev: number | null,
+function swingWalk(
+  tune: Tune,
+  style: StyleId,
+  transpose: number,
+  chorus: number,
   barIndex: number,
+  nextChorus: number,
+  nextBar: number,
+  layout: LaidChord[],
+  nextLayout: LaidChord[],
+  lastDown: number | null,
+  prevShape: WalkShape,
+  prevRun: number,
   rng: () => number,
-): BassNote[] {
-  const base = swingBass(layout, nextPc, prev, rng)
-  // Add a swung 8th skip note on beat 1.5 or 3.5 for boogie/shuffle bounce
+): WalkCacheEntry {
+  const chord = chordAt(layout, 0).chord
+  const midChord = chordAt(layout, 2).chord
+  const nextChord = nextLayout[0].chord
+  const center = registerCenter(tune.id, style, transpose, chorus, barIndex)
+  const seed = hashString(`${tune.id}|${style}|${transpose}|${chorus}|${barIndex}|db`)
+  const beat1 = downbeatPitch(chord, center, lastDown, seed)
+  const nextCenter = registerCenter(tune.id, style, transpose, nextChorus, nextBar)
+  const nextSeed = hashString(`${tune.id}|${style}|${transpose}|${nextChorus}|${nextBar}|db`)
+  const target = downbeatPitch(nextChord, nextCenter, beat1, nextSeed)
+
+  const shapes: WalkShape[] = ['step', 'arp', 'enc']
+  let shape = shapes[Math.floor(rng() * shapes.length)] ?? 'step'
+  if (shape === prevShape && prevRun >= 2) {
+    shape = shapes[(shapes.indexOf(shape) + 1 + Math.floor(rng() * 2)) % shapes.length] ?? 'arp'
+  }
+  const shapeRun = shape === prevShape ? prevRun + 1 : 1
+
+  const approach = approachPitch(target, beat1, chord, nextChord, rng)
+  const tones = pitchesOf(midChord, false)
+  const dir = Math.sign(target - beat1) || 1
+  const strongAround = shape === 'arp' ? beat1 + dir * 5 : shape === 'enc' ? target + (approach < target ? 3 : -3) : beat1 + dir * 3
+  let strong = nearestPitch(tones, strongAround, [beat1, approach, target])
+  if (Math.abs(strong - beat1) > 9) strong = nearestPitch(tones, beat1 + dir * 4, [beat1])
+  const passing = connectPitch(beat1, strong, chord, shape)
+
+  const midis = [beat1, passing, strong, approach].map((n) => Math.max(BASS_LO, Math.min(BASS_HI, n)))
+  midis[0] = nearestPitch(pitchesOf(chord, false), midis[0], lastDown == null ? [] : [lastDown])
+  for (let i = 1; i < midis.length; i++) midis[i] = distinctPitch(midis[i], midis[i - 1])
+  midis[2] = nearestPitch(tones, midis[2], [midis[0], midis[1], midis[3]])
+  if (midis[2] === midis[1] || midis[2] === midis[3]) midis[2] = distinctPitch(midis[2] + dir, midis[1])
+  for (let i = 1; i < midis.length; i++) {
+    if (midis[i] === midis[i - 1]) midis[i] = distinctPitch(midis[i] + dir, midis[i - 1])
+    if (Math.abs(midis[i] - midis[i - 1]) > 12) {
+      const pulled = midis[i - 1] + Math.sign(midis[i] - midis[i - 1]) * 7
+      midis[i] = Math.max(BASS_LO, Math.min(BASS_HI, pulled))
+    }
+  }
+
+  const notes: BassNote[] = midis.map((midi, index) => ({
+    beat: index,
+    midi,
+    beats: 1,
+    arcDb: phraseArc(index, barIndex, index === 3),
+  }))
+  addSwungPickup(notes, target, rng)
+  return { notes, shape, shapeRun, downbeat: notes[0]?.midi ?? beat1 }
+}
+
+function addSwungPickup(notes: BassNote[], target: number, rng: () => number): void {
+  const p = DYNAMICS_CONFIG.bass.skipNoteProbability
+  if (p <= 0 || rng() >= p) return
+  const approach = notes[3]?.midi ?? target
+  const side = approach <= target ? 1 : -1
+  let midi = target + side
+  if (midi < BASS_LO || midi > BASS_HI || midi === approach) midi = approach + (approach < target ? -2 : 2)
+  midi = Math.max(BASS_LO, Math.min(BASS_HI, midi))
+  if (midi === approach) midi = Math.max(BASS_LO, Math.min(BASS_HI, approach - 1))
+  notes.push({ beat: 3.5, midi, beats: 0.5, skip: true, arcDb: -7 })
+  if (p >= 0.99) {
+    const early = Math.max(BASS_LO, Math.min(BASS_HI, (notes[1]?.midi ?? midi) - 1))
+    notes.splice(2, 0, { beat: 1.5, midi: early, beats: 0.5, skip: true, arcDb: -7 })
+  }
+}
+
+function phraseArc(index: number, barIndex: number, approach: boolean): number {
+  let db = Math.sin((((barIndex % 4) + 0.5) / 4) * Math.PI) * 0.5
+  if (index === 0 && barIndex % 2 === 0) db += 1
+  if (index === 1 || index === 3) db += 0.35
+  if (approach) db -= 1.3
+  return Math.max(-2, Math.min(1.6, db))
+}
+
+/** Hold each bass note until the next onset. A written hold longer than a beat and a half is left alone. */
+function legatoBass(hits: Hit[], beatSec: number): void {
+  const bass = hits.filter((hit) => hit.part === 'bass').sort((a, b) => a.time - b.time)
+  for (let i = 0; i < bass.length; i++) {
+    const note = bass[i]
+    const next = bass[i + 1]
+    if (!note) continue
+    if (next) {
+      note.duration = Math.max(0.05, next.time - note.time)
+    } else if (note.duration < beatSec * 1.5) {
+      const nextDown = beatSec * 4 + pocketBias('bass')
+      note.duration = Math.max(0.05, nextDown - note.time)
+    }
+  }
+}
+
+/** Boogie pickup on the swung 8th after beat 2, and after beat 4 on even bars. */
+function shufflePickups(notes: BassNote[], barIndex: number): BassNote[] {
   const result: BassNote[] = []
-  for (const n of base) {
-    if (n.beat === 1 || (n.beat === 3 && barIndex % 2 === 0)) {
+  for (const n of notes) {
+    if (n.beat === 1 || (n.beat === 3 && barIndex % 2 === 0 && !n.skip)) {
       result.push({ ...n, beats: 0.65 })
-      result.push({ beat: n.beat + 0.5, midi: n.midi, beats: 0.35, skip: true })
+      const pickup = Math.max(BASS_LO, Math.min(BASS_HI, n.midi + (n.midi < 40 ? 2 : -2)))
+      result.push({ beat: n.beat + 0.5, midi: pickup === n.midi ? n.midi - 1 : pickup, beats: 0.35, skip: true, arcDb: -6 })
     } else {
       result.push(n)
     }
@@ -1304,26 +1398,97 @@ function pickApproach(dest: number, last: number | null, rng: () => number): num
   return best
 }
 
-function pass(start: number, destPc: number, chord: ChordModel): number {
-  const dest = nearestPc(destPc, start)
-  const ideal = Math.round(start + (dest - start) * 0.55)
-  const scale = new Set(chordScale(chord.kind).map((i) => mod(chord.root + i)))
-  const tones = new Set(chordTones(chord.kind).map((i) => mod(chord.root + i)))
-  let best = Math.min(58, Math.max(34, ideal))
-  let bestScore = 99
-  const lo = Math.min(start, dest)
-  const hi = Math.max(start, dest)
-  for (let n = lo; n <= hi; n++) {
-    if (n < 34 || n > 58 || n === start) continue
-    const pc = mod(n)
-    if (!scale.has(pc) && !tones.has(pc)) continue
-    const score = Math.abs(n - ideal) + (tones.has(pc) ? 0 : 0.35)
-    if (score < bestScore) {
-      bestScore = score
+function registerCenter(tuneId: string, style: StyleId, transpose: number, chorus: number, barIndex: number): number {
+  const rng = mulberry32(hashString(`bass-reg|${tuneId}|${style}|${transpose}|${chorus}`))
+  const climb = rng() < 0.5
+  const start = climb ? 30 : 45
+  const end = climb ? 45 : 30
+  const t = barIndex / 31
+  const wobble = Math.sin(barIndex / 2.5) * 1.4
+  return Math.max(29, Math.min(46, Math.round(start + (end - start) * t + wobble)))
+}
+
+function pitchesOf(chord: ChordModel, scale: boolean): number[] {
+  const ivs = scale ? chordScale(chord.kind) : chordTones(chord.kind)
+  const pcs = new Set(ivs.map((i) => mod(chord.root + i)))
+  pcs.add(mod(chord.bass))
+  const out: number[] = []
+  for (let midi = BASS_LO; midi <= BASS_HI; midi++) if (pcs.has(mod(midi))) out.push(midi)
+  return out
+}
+
+function nearestPitch(cands: number[], around: number, avoid: number[]): number {
+  const blocked = new Set(avoid)
+  const open = cands.filter((n) => !blocked.has(n))
+  const pool = open.length ? open : cands
+  let best = pool[0] ?? Math.round(around)
+  let bestD = 99
+  for (const n of pool) {
+    const d = Math.abs(n - around)
+    if (d < bestD || (d === bestD && n < best)) {
+      bestD = d
       best = n
     }
   }
-  return best
+  return Math.max(BASS_LO, Math.min(BASS_HI, best))
+}
+
+function downbeatPitch(chord: ChordModel, center: number, avoid: number | null, seed: number): number {
+  const rng = mulberry32(seed)
+  const ranked = pitchesOf(chord, false)
+    .slice()
+    .sort((a, b) => Math.abs(a - center) - Math.abs(b - center) || a - b)
+  const choices = ranked.filter((n) => n !== avoid).slice(0, 3)
+  const pool = choices.length ? choices : ranked
+  if (!pool.length) return Math.max(BASS_LO, Math.min(BASS_HI, Math.round(center)))
+  const index = rng() < 0.62 || pool.length === 1 ? 0 : rng() < 0.8 ? 1 : Math.min(2, pool.length - 1)
+  return pool[Math.min(index, pool.length - 1)] ?? pool[0]
+}
+
+function approachPitch(
+  target: number,
+  from: number,
+  chord: ChordModel,
+  nextChord: ChordModel,
+  rng: () => number,
+): number {
+  const roll = rng()
+  const choices: number[] = []
+  if (roll < 0.66) {
+    choices.push(target - 1, target + 1)
+  } else if (roll < 0.86) {
+    const fifth = mod(nextChord.root + 7)
+    for (let midi = BASS_LO; midi <= BASS_HI; midi++) if (mod(midi) === fifth) choices.push(midi)
+    choices.push(target - 5, target - 7, target + 5, target + 7)
+  } else {
+    for (const midi of pitchesOf(chord, true)) {
+      if (Math.abs(midi - target) === 1 || Math.abs(midi - target) === 2) choices.push(midi)
+    }
+  }
+  const open = choices.filter((n) => n >= BASS_LO && n <= BASS_HI && n !== target && n !== from)
+  if (!open.length) return Math.max(BASS_LO, Math.min(BASS_HI, target + (from <= target ? -1 : 1)))
+  return nearestPitch(open, from, [])
+}
+
+function connectPitch(from: number, to: number, chord: ChordModel, shape: WalkShape): number {
+  if (shape === 'arp') return nearestPitch(pitchesOf(chord, false), (from + to) / 2, [from, to])
+  if (shape === 'enc') {
+    const around = to >= from ? from - 2 : from + 2
+    return nearestPitch(pitchesOf(chord, true), around, [from, to])
+  }
+  const dir = Math.sign(to - from) || 1
+  const scale = pitchesOf(chord, true).filter((n) => (n - from) * dir > 0 && Math.abs(n - from) <= 5 && n !== to)
+  if (scale.length) return nearestPitch(scale, from + dir * 2, [])
+  const step = from + dir * 2
+  return Math.max(BASS_LO, Math.min(BASS_HI, step === to ? from + dir : step))
+}
+
+function distinctPitch(note: number, previous: number | null | undefined): number {
+  if (previous == null || note !== previous) return Math.max(BASS_LO, Math.min(BASS_HI, note))
+  const dir = note < 40 ? 1 : -1
+  let next = note + dir
+  if (next < BASS_LO || next > BASS_HI) next = note - dir
+  return Math.max(BASS_LO, Math.min(BASS_HI, next))
 }
 
 /**
@@ -1364,7 +1529,7 @@ function addPianoComp(
         : eighthOffset(Math.round(attack.beat * 2), o.beatSec, o.ratio)
     notes.forEach((midi, i) => {
       hits.push({
-        time: place(when, 'piano', o.rng, o.humanize) + i * 0.007,
+        time: place(when, 'piano', o.rng, o.humanize) + i * 0.0035,
         part: 'piano',
         midi,
         velocity: humanVelocity(
@@ -1894,7 +2059,7 @@ function addSoWhatHead(
       part: 'bass',
       midi: b.midi,
       velocity: humanVelocity(b.vel, o.rng, o.humanize),
-      duration: b.beats * o.beatSec * 0.92,
+      duration: b.beats * o.beatSec,
       pan: -0.15,
     })
   }
@@ -1904,7 +2069,7 @@ function addSoWhatHead(
     const when = swungBeatOffset(c.beat, o.beatSec, o.ratio)
     c.notes.forEach((midi, i) => {
       hits.push({
-        time: place(when, 'piano', o.rng, o.humanize) + i * 0.005,
+        time: place(when, 'piano', o.rng, o.humanize) + i * 0.0035,
         part: 'piano',
         midi,
         velocity: humanVelocity(c.vel, o.rng, o.humanize),
@@ -1950,7 +2115,7 @@ function addSoWhatIntro(
       part: 'bass',
       midi: b.midi,
       velocity: humanVelocity(b.vel, o.rng, o.humanize),
-      duration: b.beats * o.beatSec * 0.92,
+      duration: b.beats * o.beatSec,
       pan: -0.15,
     })
   }
