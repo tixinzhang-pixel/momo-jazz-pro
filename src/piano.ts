@@ -414,3 +414,71 @@ function answerNote(midi: number, time: number, vel: number, duration: number, i
     release: soft ? 'soft' : 'normal',
   }
 }
+
+/**
+ * Round-1 phase test, musical bars 1–16 only.
+ * The answer already uses the bar's swing fraction, then adds its own layback
+ * past the ride pocket. This moves each answer chord so its first note-on
+ * matches the ride note on that grid point, or the grid plus the ride pocket
+ * when a fill removed the ride. Offsets inside the chord stay. Duration,
+ * velocity, pitch, and gain are not touched.
+ */
+export function lockAnswerOnsetsToRide(piano: Hit[], drums: Hit[], beatSec: number, ratio: number): void {
+  if (piano.length === 0) return
+  const ride = drums.filter((hit) => hit.drum === 'ride' || hit.drum === 'rideBell')
+  const anchor = (beatPos: number) => {
+    const expect = swungBeatOffset(beatPos, beatSec, ratio) + pocketBias('ride')
+    let best: number | null = null
+    let bestD = 0.03
+    for (const hit of ride) {
+      const d = Math.abs(hit.time - expect)
+      if (d <= bestD) {
+        bestD = d
+        best = hit.time
+      }
+    }
+    return best ?? expect
+  }
+  const split = 2.7 * beatSec
+  const shiftGroup = (group: Hit[], beatPos: number) => {
+    if (group.length === 0) return
+    const start = Math.min(...group.map((hit) => hit.time))
+    const delta = anchor(beatPos) - start
+    for (const hit of group) hit.time += delta
+  }
+  shiftGroup(
+    piano.filter((hit) => hit.time < split),
+    2,
+  )
+  shiftGroup(
+    piano.filter((hit) => hit.time >= split),
+    3.5,
+  )
+}
+
+/**
+ * Round 2, musical bars 1–16 only. The two answer chords currently differ by
+ * about 1.5 MIDI, which is under 0.3 dB after velocity^1.35, and the five
+ * voices inside a chord differ by under 2 MIDI. These fixed offsets make the
+ * short 4& the accent (about 4 dB above the long chord) and the top voice the
+ * line. The ten offsets sum to 0, so a whole answer's mean velocity does not rise.
+ * Note-on, duration, pitch, gain, and pan stay as they are.
+ */
+const ANSWER_VELOCITY_OFFSET = {
+  1: [-15, -12, -12, -12, -9],
+  2: [9, 12, 12, 12, 15],
+}
+
+export function shapeThemeAnswerVelocity(piano: Hit[], beatSec: number): void {
+  if (piano.length === 0) return
+  const split = 2.7 * beatSec
+  for (const chord of [1, 2] as const) {
+    const group = piano.filter((hit) => (chord === 1 ? hit.time < split : hit.time >= split))
+    const ranked = [...group].sort((a, b) => (a.midi ?? 0) - (b.midi ?? 0) || a.time - b.time)
+    const offsets = ANSWER_VELOCITY_OFFSET[chord]
+    ranked.forEach((hit, index) => {
+      const offset = offsets[Math.min(index, offsets.length - 1)] ?? 0
+      hit.velocity = Math.min(127, Math.max(1, hit.velocity * 127 + offset)) / 127
+    })
+  }
+}
