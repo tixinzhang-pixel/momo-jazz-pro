@@ -47,4 +47,22 @@ describe('theme bars 1-16 answer phase', () => {
     expect(ride).toBeDefined()
     expect(Math.abs(start - ride!)).toBeGreaterThan(0.003)
   })
+
+  it('gives the theme short chord a louder top voice without moving the notes', () => {
+    const split = 2.7 * beat
+    const top = (bar: number, chord: 1 | 2) => {
+      const group = barHits(bar)
+        .filter((hit) => hit.part === 'piano')
+        .filter((hit) => (chord === 1 ? hit.time < split : hit.time >= split))
+      const lead = [...group].sort((a, b) => (a.midi ?? 0) - (b.midi ?? 0)).at(-1)
+      return (lead?.velocity ?? 0) * 127
+    }
+    for (const bar of [1, 3, 5, 9, 11, 13]) {
+      expect(top(bar, 2) - top(bar, 1)).toBeGreaterThanOrEqual(4)
+    }
+    expect(Math.abs(top(17, 2) - top(17, 1))).toBeLessThan(4)
+    const once = barHits(1).filter((hit) => hit.part === 'piano').map((hit) => hit.time)
+    const twice = barHits(1).filter((hit) => hit.part === 'piano').map((hit) => hit.time)
+    expect(twice).toEqual(once)
+  })
 })

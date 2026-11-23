@@ -455,3 +455,30 @@ export function lockAnswerOnsetsToRide(piano: Hit[], drums: Hit[], beatSec: numb
     3.5,
   )
 }
+
+/**
+ * Round 2, musical bars 1–16 only. The two answer chords currently differ by
+ * about 1.5 MIDI, which is under 0.3 dB after velocity^1.35, and the five
+ * voices inside a chord differ by under 2 MIDI. These fixed offsets make the
+ * short 4& the accent (about 4 dB above the long chord) and the top voice the
+ * line. The ten offsets sum to 0, so a whole answer's mean velocity does not rise.
+ * Note-on, duration, pitch, gain, and pan stay as they are.
+ */
+const ANSWER_VELOCITY_OFFSET = {
+  1: [-15, -12, -12, -12, -9],
+  2: [9, 12, 12, 12, 15],
+}
+
+export function shapeThemeAnswerVelocity(piano: Hit[], beatSec: number): void {
+  if (piano.length === 0) return
+  const split = 2.7 * beatSec
+  for (const chord of [1, 2] as const) {
+    const group = piano.filter((hit) => (chord === 1 ? hit.time < split : hit.time >= split))
+    const ranked = [...group].sort((a, b) => (a.midi ?? 0) - (b.midi ?? 0) || a.time - b.time)
+    const offsets = ANSWER_VELOCITY_OFFSET[chord]
+    ranked.forEach((hit, index) => {
+      const offset = offsets[Math.min(index, offsets.length - 1)] ?? 0
+      hit.velocity = Math.min(127, Math.max(1, hit.velocity * 127 + offset)) / 127
+    })
+  }
+}
