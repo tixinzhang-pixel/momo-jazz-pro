@@ -24,7 +24,7 @@ import {
   swungBeatOffset,
 } from './feel.ts'
 import type { Pocket } from './feel.ts'
-import { soloCompHits, soWhatAnswerHits } from './piano.ts'
+import { lockAnswerOnsetsToRide, soloCompHits, soWhatAnswerHits } from './piano.ts'
 import { turnAt } from './trading.ts'
 import { chordScale, chordTones, guideIntervals, mod, parseChord, transposeModel } from './theory.ts'
 import type {
@@ -2161,13 +2161,15 @@ function addSoWhatHead(
   }
 
   const semitone = o.transpose + (isEb ? 1 : 0)
-  for (const hit of soWhatAnswerHits({
+  const answer = soWhatAnswerHits({
     barIndex: o.barIndex,
     beatSec: o.beatSec,
     ratio: o.ratio,
     semitone,
     rng: o.rng,
-  })) hits.push(hit)
+  })
+  if (o.barIndex < 16) lockAnswerOnsetsToRide(answer, hits, o.beatSec, o.ratio)
+  for (const hit of answer) hits.push(hit)
 
   // Drum catches on the two response hits (Beat 3 and Beat 4&)
   if (!o.userDrums && !o.drumSolo && head.chords.length > 0) {

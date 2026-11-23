@@ -414,3 +414,44 @@ function answerNote(midi: number, time: number, vel: number, duration: number, i
     release: soft ? 'soft' : 'normal',
   }
 }
+
+/**
+ * Round-1 phase test, musical bars 1–16 only.
+ * The answer already uses the bar's swing fraction, then adds its own layback
+ * past the ride pocket. This moves each answer chord so its first note-on
+ * matches the ride note on that grid point, or the grid plus the ride pocket
+ * when a fill removed the ride. Offsets inside the chord stay. Duration,
+ * velocity, pitch, and gain are not touched.
+ */
+export function lockAnswerOnsetsToRide(piano: Hit[], drums: Hit[], beatSec: number, ratio: number): void {
+  if (piano.length === 0) return
+  const ride = drums.filter((hit) => hit.drum === 'ride' || hit.drum === 'rideBell')
+  const anchor = (beatPos: number) => {
+    const expect = swungBeatOffset(beatPos, beatSec, ratio) + pocketBias('ride')
+    let best: number | null = null
+    let bestD = 0.03
+    for (const hit of ride) {
+      const d = Math.abs(hit.time - expect)
+      if (d <= bestD) {
+        bestD = d
+        best = hit.time
+      }
+    }
+    return best ?? expect
+  }
+  const split = 2.7 * beatSec
+  const shiftGroup = (group: Hit[], beatPos: number) => {
+    if (group.length === 0) return
+    const start = Math.min(...group.map((hit) => hit.time))
+    const delta = anchor(beatPos) - start
+    for (const hit of group) hit.time += delta
+  }
+  shiftGroup(
+    piano.filter((hit) => hit.time < split),
+    2,
+  )
+  shiftGroup(
+    piano.filter((hit) => hit.time >= split),
+    3.5,
+  )
+}
